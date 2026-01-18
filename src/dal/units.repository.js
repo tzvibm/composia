@@ -50,3 +50,11 @@ const deleteBatch = async (ids) => {
   const res = await db.query('DELETE FROM units WHERE id = ANY($1)', [ids]);
   return res.rowCount;
 };
+
+module.exports = {
+  insertBatch,
+  findMany,
+  updateUnits,
+  updatePayloads,
+  deleteBatch
+};
