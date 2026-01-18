@@ -1,0 +1,15 @@
+{
+    "endpoint": "GET /units",
+    "description": "Fetch all the units in the system",
+    "response": {
+        "status": 200,
+        "body": [
+            {
+                "id": "Hash32",
+                "label": "string",
+                "payload": "object",
+                "created_at": "ISO-8601"
+            }
+        ]
+    }
+}
