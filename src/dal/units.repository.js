@@ -45,3 +45,8 @@ const updatePayloads = async (updates) => {
   ]);
   return res.rowCount;
 };
+
+const deleteBatch = async (ids) => {
+  const res = await db.query('DELETE FROM units WHERE id = ANY($1)', [ids]);
+  return res.rowCount;
+};
