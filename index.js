@@ -1,5 +1,4 @@
-require('dotenv').config();
-const { start } = require('./src/app');
+import 'dotenv/config';
+import { start } from './src/app.js';
 
-// Boot the Kernel
 start();

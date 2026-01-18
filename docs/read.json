@@ -1,6 +1,9 @@
 {
-    "endpoint": "GET /units",
-    "description": "Fetch all the units in the system",
+    "endpoint": "GET /units/:id OR GET /units?ids=id1,id2",
+    "description": "Fetch one or more atomic units by their unique identifiers",
+    "request_params": {
+        "ids": "Array of Hash32"
+    },
     "response": {
         "status": 200,
         "body": [

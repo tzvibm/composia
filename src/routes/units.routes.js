@@ -1,7 +1,8 @@
-const unitsController = require('../controllers/units.controller');
+import * as unitsController from '../controllers/units.controller.js';
 
-async function unitRoutes(fastify, options) {
-  fastify.post('/units', unitsController.createUnits);
+export default async function unitRoutes(fastify, options) {
+    fastify.post('/units', unitsController.createUnits);
+    fastify.get('/units', unitsController.getUnits);
+    fastify.get('/units/:id', unitsController.getUnits);
+    fastify.patch('/units', unitsController.updateUnits);
 }
-
-module.exports = unitRoutes;

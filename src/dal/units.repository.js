@@ -1,6 +1,7 @@
-const db = require('./db');
+import * as db from './db.js';
 
-const createUnits = async (units) => {
+
+export const createUnits = async (units) => {
   const query = `
     INSERT INTO units (id, label, payload)
     SELECT * FROM UNNEST($1::text[], $2::text[], $3::jsonb[])
@@ -9,32 +10,40 @@ const createUnits = async (units) => {
   const res = await db.query(query, [
     units.map(u => u.id),
     units.map(u => u.label),
-    units.map(u => JSON.stringify(u.payload))
+    // Use the native array, pg driver handles the mapping to jsonb[] better if not pre-stringified
+    // or cast explicitly if you encounter errors
+    units.map(u => u.payload) 
   ]);
   return res.rows;
 };
 
-const readUnits = async (ids) => {
-  const query = 'SELECT * FROM units WHERE id = ANY($1)';
+
+export const readUnits = async (ids) => {
+  const query = 'SELECT * FROM units WHERE id = ANY($1::text[])';
   const res = await db.query(query, [ids]);
   return res.rows;
 };
 
-const updateUnits = async (units) => {
+
+export const updateUnits = async (units) => {
   const query = `
     UPDATE units SET
       label = COALESCE(tmp.label, units.label)
     FROM (SELECT UNNEST($1::text[]) as id, UNNEST($2::text[]) as label) as tmp
-    WHERE units.id = tmp.id;
+    WHERE units.id = tmp.id
+    RETURNING units.*;  -- <--- This returns the full updated rows
   `;
+  
   const res = await db.query(query, [
     units.map(u => u.id),
     units.map(u => u.label ?? null)
   ]);
-  return res.rowCount;
+  
+  return res.rows;
 };
 
-const updatePayloads = async (updates) => {
+
+export const updatePayloads = async (updates) => {
   const query = `
     UPDATE units SET
       payload = payload || tmp.new_payload
@@ -43,20 +52,13 @@ const updatePayloads = async (updates) => {
   `;
   const res = await db.query(query, [
     updates.map(u => u.id),
-    updates.map(u => JSON.stringify(u.payload ?? {}))
+    updates.map(u => u.payload ?? {})
   ]);
   return res.rowCount;
 };
 
-const deleteBatch = async (ids) => {
-  const res = await db.query('DELETE FROM units WHERE id = ANY($1)', [ids]);
-  return res.rowCount;
-};
 
-module.exports = {
-  createUnits,
-  readUnits,
-  updateUnits,
-  updatePayloads,
-  deleteBatch
+export const deleteBatch = async (ids) => {
+  const res = await db.query('DELETE FROM units WHERE id = ANY($1::text[])', [ids]);
+  return res.rowCount;
 };
