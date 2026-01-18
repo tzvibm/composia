@@ -1,3 +1,5 @@
+const db = require('./db');
+
 const createUnits = async (units) => {
   const query = `
     INSERT INTO units (id, label, payload)
@@ -52,8 +54,8 @@ const deleteBatch = async (ids) => {
 };
 
 module.exports = {
-  insertBatch,
-  findMany,
+  createUnits,
+  readUnits,
   updateUnits,
   updatePayloads,
   deleteBatch
