@@ -1,0 +1,26 @@
+{
+  "name": "composia",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "",
+  "main": "src/kernel.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tzvibm/composia.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/tzvibm/composia/issues"
+  },
+  "homepage": "https://github.com/tzvibm/composia#readme",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "pg": "^8.17.1"
+  }
+}
