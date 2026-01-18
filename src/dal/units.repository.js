@@ -17,3 +17,17 @@ const readUnits = async (ids) => {
   const res = await db.query(query, [ids]);
   return res.rows;
 };
+
+const updateUnits = async (units) => {
+  const query = `
+    UPDATE units SET
+      label = COALESCE(tmp.label, units.label)
+    FROM (SELECT UNNEST($1::text[]) as id, UNNEST($2::text[]) as label) as tmp
+    WHERE units.id = tmp.id;
+  `;
+  const res = await db.query(query, [
+    units.map(u => u.id),
+    units.map(u => u.label ?? null)
+  ]);
+  return res.rowCount;
+};
