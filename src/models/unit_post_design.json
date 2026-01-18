@@ -1,0 +1,21 @@
+{
+    "endpoint": "POST /units",
+    "description": "Create one or more standalone atomic units (Milestone 1)",
+    "request_body": [
+        {
+            "label": "string (required)",
+            "payload": "object (optional, default: {})"
+        }
+    ],
+    "response": {
+        "status": 201,
+        "body": [
+            {
+                "id": "Hash32",
+                "label": "string",
+                "payload": "object",
+                "created_at": "ISO-8601"
+            }
+        ]
+    }
+}
