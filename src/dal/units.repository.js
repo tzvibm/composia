@@ -31,3 +31,17 @@ const updateUnits = async (units) => {
   ]);
   return res.rowCount;
 };
+
+const updatePayloads = async (updates) => {
+  const query = `
+    UPDATE units SET
+      payload = payload || tmp.new_payload
+    FROM (SELECT UNNEST($1::text[]) as id, UNNEST($2::jsonb[]) as new_payload) as tmp
+    WHERE units.id = tmp.id;
+  `;
+  const res = await db.query(query, [
+    updates.map(u => u.id),
+    updates.map(u => JSON.stringify(u.payload ?? {}))
+  ]);
+  return res.rowCount;
+};
