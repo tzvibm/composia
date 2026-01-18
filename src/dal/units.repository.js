@@ -11,3 +11,9 @@ const createUnits = async (units) => {
   ]);
   return res.rows;
 };
+
+const readUnits = async (ids) => {
+  const query = 'SELECT * FROM units WHERE id = ANY($1)';
+  const res = await db.query(query, [ids]);
+  return res.rows;
+};
