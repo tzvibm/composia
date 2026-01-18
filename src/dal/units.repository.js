@@ -48,15 +48,15 @@ export const updatePayloads = async (updates) => {
     UPDATE units SET
       payload = payload || tmp.new_payload
     FROM (SELECT UNNEST($1::text[]) as id, UNNEST($2::jsonb[]) as new_payload) as tmp
-    WHERE units.id = tmp.id;
+    WHERE units.id = tmp.id
+    RETURNING units.*; -- Return the full object after the merge
   `;
   const res = await db.query(query, [
     updates.map(u => u.id),
     updates.map(u => u.payload ?? {})
   ]);
-  return res.rowCount;
+  return res.rows;
 };
-
 
 export const deleteBatch = async (ids) => {
   const res = await db.query('DELETE FROM units WHERE id = ANY($1::text[])', [ids]);

@@ -39,3 +39,15 @@ export const UpdateUnitsRequestSchema = z.array(
 ).min(1);
 
 export const UpdateResponseSchema = z.array(UnitSchema);
+
+
+// Request: Array of ID + Payload objects
+export const UpdatePayloadsRequestSchema = z.array(
+  z.object({
+    id: z.string().length(32).regex(/^[a-f0-9]+$/i),
+    payload: z.record(z.any()).default({})
+  })
+).min(1);
+
+// Response: Array of full Unit objects (reusing our base schema)
+export const UpdatePayloadsResponseSchema = z.array(UnitSchema);

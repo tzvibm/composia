@@ -5,7 +5,9 @@ import {
   ReadRequestSchema, 
   ReadResponseSchema, 
   UpdateUnitsRequestSchema, 
-  UpdateResponseSchema 
+  UpdateResponseSchema,
+  UpdatePayloadsRequestSchema, 
+  UpdatePayloadsResponseSchema
 } from '../models/unit.model.js';
 import * as unitsRepo from '../dal/units.repository.js';
 
@@ -39,4 +41,16 @@ export const updateUnits = async (userInput) => {
 
   // Validate the rows coming back from the DB to ensure they match our Unit model
   return UpdateResponseSchema.parse(updatedRows);
+};
+
+
+export const updatePayloads = async (userInput) => {
+  // 1. Validate the merge request
+  const validatedInput = UpdatePayloadsRequestSchema.parse(userInput);
+
+  // 2. Execute the JSONB merge in DAL
+  const updatedRows = await unitsRepo.updatePayloads(validatedInput);
+
+  // 3. Return the fully updated units
+  return UpdatePayloadsResponseSchema.parse(updatedRows);
 };

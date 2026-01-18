@@ -50,3 +50,17 @@ export const updateUnits = async (request, reply) => {
     return reply.code(500).send({ error: 'Internal Server Error' });
   }
 };
+
+
+export const updatePayloads = async (request, reply) => {
+  try {
+    const result = await unitsService.updatePayloads(request.body);
+    return reply.send(result);
+  } catch (error) {
+    if (error.name === 'ZodError') {
+      return reply.code(400).send({ error: 'Validation Failed', details: error.errors });
+    }
+    request.log.error(error);
+    return reply.code(500).send({ error: 'Internal Server Error' });
+  }
+};

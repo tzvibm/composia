@@ -5,4 +5,5 @@ export default async function unitRoutes(fastify, options) {
     fastify.get('/units', unitsController.getUnits);
     fastify.get('/units/:id', unitsController.getUnits);
     fastify.patch('/units', unitsController.updateUnits);
+    fastify.patch('/units/payload', unitsController.updatePayloads);
 }
