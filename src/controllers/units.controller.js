@@ -64,3 +64,17 @@ export const updatePayloads = async (request, reply) => {
     return reply.code(500).send({ error: 'Internal Server Error' });
   }
 };
+
+
+export const deleteUnits = async (request, reply) => {
+  try {
+    const result = await unitsService.deleteUnits(request.body);
+    return reply.send(result);
+  } catch (error) {
+    if (error.name === 'ZodError') {
+      return reply.code(400).send({ error: 'Validation Failed', details: error.errors });
+    }
+    request.log.error(error);
+    return reply.code(500).send({ error: 'Internal Server Error' });
+  }
+};

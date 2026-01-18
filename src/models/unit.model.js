@@ -51,3 +51,15 @@ export const UpdatePayloadsRequestSchema = z.array(
 
 // Response: Array of full Unit objects (reusing our base schema)
 export const UpdatePayloadsResponseSchema = z.array(UnitSchema);
+
+
+// Input: Expects an object with an "ids" array
+export const DeleteUnitsRequestSchema = z.object({
+  ids: z.array(z.string().length(32).regex(/^[a-f0-9]+$/i)).min(1)
+});
+
+// Output: Matches your documentation
+export const DeleteUnitsResponseSchema = z.object({
+  deleted: z.array(z.string()),
+  count: z.number()
+});

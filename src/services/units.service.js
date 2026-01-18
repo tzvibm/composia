@@ -7,7 +7,9 @@ import {
   UpdateUnitsRequestSchema, 
   UpdateResponseSchema,
   UpdatePayloadsRequestSchema, 
-  UpdatePayloadsResponseSchema
+  UpdatePayloadsResponseSchema,
+  DeleteUnitsRequestSchema, 
+  DeleteUnitsResponseSchema
 } from '../models/unit.model.js';
 import * as unitsRepo from '../dal/units.repository.js';
 
@@ -53,4 +55,16 @@ export const updatePayloads = async (userInput) => {
 
   // 3. Return the fully updated units
   return UpdatePayloadsResponseSchema.parse(updatedRows);
+};
+
+
+export const deleteUnits = async (userInput) => {
+  // 1. Validate the list of IDs
+  const { ids } = DeleteUnitsRequestSchema.parse(userInput);
+
+  // 2. Execute deletion
+  const result = await unitsRepo.deleteBatch(ids);
+
+  // 3. Return validated response
+  return DeleteUnitsResponseSchema.parse(result);
 };

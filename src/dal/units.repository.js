@@ -59,6 +59,12 @@ export const updatePayloads = async (updates) => {
 };
 
 export const deleteBatch = async (ids) => {
-  const res = await db.query('DELETE FROM units WHERE id = ANY($1::text[])', [ids]);
-  return res.rowCount;
+  // We use RETURNING id to get back the specific keys that were deleted
+  const query = 'DELETE FROM units WHERE id = ANY($1::text[]) RETURNING id';
+  const res = await db.query(query, [ids]);
+  
+  return {
+    deleted: res.rows.map(row => row.id),
+    count: res.rowCount
+  };
 };
