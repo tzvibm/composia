@@ -2,10 +2,14 @@ const fastify = require('fastify')({ logger: true });
 
 // 1. Register Plugins
 fastify.register(require('@fastify/cors'), { 
-  origin: true // Adjust for production later
+  origin: true 
 });
 
-// 2. Placeholder for Routes (to be connected in #36)
+// 2. Register Feature Routes
+// This hooks up the /units endpoint we just built
+fastify.register(require('./routes/units.routes'));
+
+// 3. Health Check
 fastify.get('/health', async () => ({ status: 'ok' }));
 
 /**
