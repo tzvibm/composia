@@ -1,4 +1,4 @@
-const insertBatch = async (units) => {
+const createUnits = async (units) => {
   const query = `
     INSERT INTO units (id, label, payload)
     SELECT * FROM UNNEST($1::text[], $2::text[], $3::jsonb[])
