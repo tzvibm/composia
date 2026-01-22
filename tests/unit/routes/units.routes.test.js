@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// Import the default export and name it unitRoutes
+import unitRoutes from '../../../src/routes/units.routes.js';
 import * as unitsController from '../../../src/controllers/units.controller.js';
 
 describe('Unit Routes', () => {
   let fastify;
 
   beforeEach(() => {
-    // Create a mock Fastify instance
+    // Mock the Fastify instance
     fastify = {
       post: vi.fn(),
       get: vi.fn(),
@@ -17,19 +19,11 @@ describe('Unit Routes', () => {
   it('should register all expected unit endpoints', async () => {
     await unitRoutes(fastify);
 
-    // Verify POST /units
+    // Verify all routes are registered with the correct controller methods
     expect(fastify.post).toHaveBeenCalledWith('/units', unitsController.createUnits);
-
-    // Verify GET /units
     expect(fastify.get).toHaveBeenCalledWith('/units', unitsController.getUnits);
-
-    // Verify PATCH /units (Labels)
     expect(fastify.patch).toHaveBeenCalledWith('/units', unitsController.updateUnits);
-
-    // Verify PATCH /units/payload (Deep Merge)
     expect(fastify.patch).toHaveBeenCalledWith('/units/payload', unitsController.updatePayloads);
-
-    // Verify DELETE /units
     expect(fastify.delete).toHaveBeenCalledWith('/units', unitsController.deleteUnits);
   });
 });
