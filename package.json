@@ -5,14 +5,15 @@
   "description": "",
   "main": "src/kernel.js",
   "scripts": {
-  "start": "NODE_ENV=production node index.js",
+    "start": "NODE_ENV=production node index.js",
     "dev": "NODE_ENV=development node index.js",
     "db:test-setup": "bash src/scripts/setup-test.sh",
-    "db:dev-setup": "bash src/scripts/setup-dev.sh",
-    "migrate": "bash src/scripts/migrate.sh",
     "pretest": "npm run db:test-setup",
-    "test": "NODE_ENV=test vitest run"
-  },  
+    "test": "NODE_ENV=test vitest run",
+    "test:watch": "NODE_ENV=test vitest",
+    "test:ui": "NODE_ENV=test vitest --ui",
+    "test:coverage": "NODE_ENV=test vitest run --coverage"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tzvibm/composia.git"
@@ -32,6 +33,8 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.18",
+    "@vitest/ui": "^4.0.18",
     "dotenv": "^17.2.3",
     "vitest": "^4.0.17"
   }
