@@ -1,5 +1,4 @@
-import * as db from './db.js';
-
+import { db } from './db.js';
 
 export const createUnits = async (units) => {
   const query = `
@@ -10,9 +9,7 @@ export const createUnits = async (units) => {
   const res = await db.query(query, [
     units.map(u => u.id),
     units.map(u => u.label),
-    // Use the native array, pg driver handles the mapping to jsonb[] better if not pre-stringified
-    // or cast explicitly if you encounter errors
-    units.map(u => u.payload) 
+    units.map(u => u.payload || {}) 
   ]);
   return res.rows;
 };

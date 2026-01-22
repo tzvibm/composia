@@ -1,12 +1,25 @@
 import pg from 'pg';
+import dotenv from 'dotenv';
+import path from 'path';
+
+// FORCE load env here so the Pool isn't empty when Vitest starts
+const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
+dotenv.config({ path: path.resolve(process.cwd(), envFile) });
+
 const { Pool } = pg;
 
-const pool = new Pool({
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  database: process.env.DB_NAME,
+export const db = new Pool({
+  user: String(process.env.DB_USER),
+  host: String(process.env.DB_HOST),
+  database: String(process.env.DB_NAME),
+  password: String(process.env.DB_PASSWORD),
+  port: Number(process.env.DB_PORT),
 });
 
-export const query = (text, params) => pool.query(text, params);
+export const cleanDb = async () => {
+  await db.query('TRUNCATE TABLE units RESTART IDENTITY CASCADE');
+};
+
+export const closeDb = async () => {
+  await db.end();
+};
