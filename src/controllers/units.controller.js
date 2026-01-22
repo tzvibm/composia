@@ -13,7 +13,6 @@ export const createUnits = async (request, reply) => {
   }
 };
 
-
 export const getUnits = async (request, reply) => {
   try {
     // We prioritize the path param (:id), then the query (?ids=)
