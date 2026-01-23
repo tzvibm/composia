@@ -56,13 +56,11 @@
         },
         {
             "path": "PUT /hierarchy/move",
-            "desc": "Move: Detach from oldParent and Attach to newParent (:id)",
+            "desc": "Move: Detach from oldParent and Attach to newParent",
             "body": {
                 "childId": "32bit",
                 "oldParentId": "32bit",
                 "newParentId": "32bit",
-                "depth": "Optional: int, Default: 0",
-                "width": "Optional: int, Default: 0",
                 "order": "int"
             }
         },
