@@ -51,9 +51,7 @@
             "body": {
                 "parentId": "32bit",
                 "childId": "32bit",
-                "order": "int",
-                "depth": "Optional: int, Default: 0",
-                "width": "Optional: int, Default: 0"
+                "order": "int"
             }
         },
         {
