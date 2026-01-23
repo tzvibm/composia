@@ -1,0 +1,85 @@
+{
+    "endpoints": [
+        {
+            "path": "POST /hierarchy/create",
+            "desc": "Generation: Create a new nested hierarchy structure from scratch",
+            "body": {
+                "parentId": "Optional: mount to a 32bit parent unit",
+                "hierarchy": "{}"
+            }
+        },
+        {
+            "path": "GET /hierarchy/get/:id",
+            "desc": "Windowed Fetch: Returns stitched context",
+            "query": {
+                "depth": "int",
+                "width": "int"
+            }
+        },
+        {
+            "path": "PATCH /unit/update",
+            "desc": "Modification: update unit's metadata",
+            "body": [
+                {
+                    "unitId": "update"
+                }
+            ]
+        },
+        {
+            "path": "PATCH /payload/update",
+            "desc": "Modification: deep-merge update payload JSON data",
+            "body": [
+                {
+                    "unitId": "{update}"
+                }
+            ]
+        },
+        {
+            "path": "POST /hierarchy/mount",
+            "desc": "Append: hierarchy to parent :id",
+            "body": {
+                "parentId": "32bit",
+                "childId": "32bit",
+                "order": "int",
+                "depth": "Optional: int, Default: 0",
+                "width": "Optional: int, Default: 0"
+            }
+        },
+        {
+            "path": "PUT /hierarchy/move",
+            "desc": "Move: Detach from oldParent and Attach to newParent (:id)",
+            "body": {
+                "childId": "32bit",
+                "oldParentId": "32bit",
+                "newParentId": "32bit",
+                "depth": "Optional: int, Default: 0",
+                "width": "Optional: int, Default: 0",
+                "order": "int"
+            }
+        },
+        {
+            "path": "DELETE /unit/detach",
+            "desc": "Structural Removal: Break link between parent and child",
+            "body": {
+                "parentId": "32bit",
+                "childId": "32bit"
+            }
+        },
+        {
+            "path": "DELETE /hierarchy/detach",
+            "desc": "Recursive Deletdetache: breaks the links starting at id",
+            "id": "32bit",
+            "depth": "Optional: int, Default: all",
+            "width": "Optional: int, Default: all",
+            "confirm": "boolean"
+        },
+        {
+            "path": "DELETE /hierarchy/delete",
+            "desc": "Recursive Delete: Wipes the link tree starting at id",
+            "id": "32bit",
+            "depth": "Optional: int, Default: 0",
+            "width": "Optional: int, Default: 0",
+            "confirm": "boolean"
+        }
+    ]
+}
