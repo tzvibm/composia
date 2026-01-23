@@ -1,0 +1,41 @@
+{
+    "endpoint": "GET /hierarchy/get/id",
+    "description": "Windowed Fetch: Returns the structural hierarchy. Recursion is limited by depth, and horizontal siblings are limited by width.",
+    "request_query": {
+        "depth": "integer (optional, default: 1, max: 1)",
+        "width": "integer (optional, default: 10, max: 50)"
+    },
+    "response": {
+        "status": 200,
+        "body": {
+            "id": "Hash32", 
+            "label": "string",
+            "payload": "object (raw DNA only)",
+            "order": "integer",
+            "children": [
+                {
+                    "id": "Hash32",
+                    "label": "string",
+                    "payload": "object", 
+                    "order": 1, 
+                    "children": [
+                        {
+                            "id": "Hash32",
+                            "label": "Deep Child",
+                            "payload": { "key": "value" },
+                            "order": 1,
+                            "children": "..."
+                        }
+                    ]
+                },
+                {
+                    "id": "Hash32",
+                    "label": "string",
+                    "payload": "object",
+                    "order": 2,
+                    "children": []
+                }
+            ]
+        }
+    }
+}
