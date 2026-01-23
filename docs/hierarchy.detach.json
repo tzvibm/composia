@@ -1,0 +1,16 @@
+{
+    "endpoint": "DELETE /hierarchy/detach/:id",
+    "description": "Recursive Detach: Breaks the links starting at the target ID and recurses downwards. Units are NOT deleted; only their hierarchical relationships are removed.",
+    "request_body": {
+        "depth": "int (Optional, Default: all) - How deep to sever links",
+        "width": "int (Optional, Default: all) - How many siblings per level to sever",
+        "confirm": "boolean (Required: true) - Safety flag"
+    },
+    "response": {
+        "status": 200,
+        "body": {
+            "message": "Hierarchy branch successfully detached",
+            "linksRemoved": "integer"
+        }
+    }
+}
