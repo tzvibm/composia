@@ -1,21 +1,37 @@
 {
-    "endpoint": "POST /units",
-    "description": "Create one or more standalone atomic units (Milestone 1)",
-    "request_body": [
-        {
-            "label": "string (required)",
-            "payload": "object (optional, default: {})"
-        }
-    ],
-    "response": {
-        "status": 201,
-        "body": [
+    "endpoint": "POST /hierarchy/create",
+    "description": "Generation: Create a new nested hierarchy structure from scratch. Optionally mounts the root of this new tree to an existing parentId.",
+    "request_body": {
+        "parentId": "Hash32 (optional, if mounting to existing unit)",
+        "hierarchy": [
             {
-                "id": "Hash32",
-                "label": "string",
-                "payload": "object",
-                "created_at": "ISO-8601"
+                "label": "string (required)",
+                "payload": "object (optional, default: {})",
+                "order": "integer (optional, only needed when mounting, default when mounting: last)",
+                "children": [
+                    {
+                        "label": "string (required)",
+                        "payload": "object (optional)",
+                        "order": "integer (required)",
+                        "children": "recursive Hierarchy structure..."
+                    }
+                ]
             }
         ]
+    },
+    "response": {
+        "status": 201,
+        "body": {
+            "rootId": "Hash32",
+            "structure": [
+                {
+                    "id": "Hash32",
+                    "label": "string",
+                    "payload": "object",
+                    "order": "integer",
+                    "children": "..."
+                }
+            ]
+        }
     }
 }
