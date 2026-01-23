@@ -1,0 +1,16 @@
+{
+    "endpoint": "POST /hierarchy/mount",
+    "description": "Append: Establishes a new link between an existing parent and child. This is a pure structural operation.",
+    "request_body": {
+        "parentId": "32bit (required)",
+        "childId": "32bit (required)",
+        "order": "int (required - position within the new parent's children)"
+    },
+    "response": {
+        "status": 201,
+        "body": {
+            "linkId": "32bit",
+            "message": "Unit successfully mounted to parent"
+        }
+    }
+}
