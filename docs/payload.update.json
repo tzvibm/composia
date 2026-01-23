@@ -1,0 +1,14 @@
+{
+    "endpoint": "PATCH /payload/update",
+    "description": "Batch partial update of unit's payload object. Performs a deep-merge into the existing JSONB payload.",
+    "request_body": [
+        {
+            "id": "Hash32 (required)",
+            "payload": "object (merges with current)"
+        }
+    ],
+    "response": {
+        "status": 200,
+        "body": { "updated": "integer" }
+    }
+}
