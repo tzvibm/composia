@@ -1,0 +1,17 @@
+{
+    "endpoint": "PUT /hierarchy/move",
+    "description": "Move: Atomic structural change that detaches a unit from one parent and attaches it to another at a specified order.",
+    "request_body": {
+        "childId": "32bit (required)",
+        "oldParentId": "32bit (required)",
+        "newParentId": "32bit (required)",
+        "order": "int (required)"
+    },
+    "response": {
+        "status": 200,
+        "body": {
+            "message": "Unit successfully moved",
+            "newLinkId": "32bit"
+        }
+    }
+}
