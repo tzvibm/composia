@@ -10,14 +10,14 @@
         },
         {
             "path": "GET /hierarchy/get/:id",
-            "desc": "Windowed Fetch: Returns stitched context",
+            "desc": "Windowed Fetch: Returns hierarchy",
             "query": {
                 "depth": "int",
                 "width": "int"
             }
         },
         {
-            "path": "PATCH /unit/update",
+            "path": "PATCH /units/update",
             "desc": "Modification: update unit's metadata",
             "body": [
                 {
@@ -31,6 +31,17 @@
             "body": [
                 {
                     "unitId": "{update}"
+                }
+            ]
+        },
+        {
+            "path": "PATCH /order/update",
+            "desc": "Modification: update order for a unit",
+            "body": [
+                {
+                    "unitId": "32bit",
+                    "linkId": "32bit",
+                    "order": "int"
                 }
             ]
         },
