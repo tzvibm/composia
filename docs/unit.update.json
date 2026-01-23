@@ -1,0 +1,14 @@
+{
+    "endpoint": "PATCH /units/update",
+    "description": "Batch update of unit metadata (labels). Affects the base atom, regardless of where it appears in the hierarchy.",
+    "request_body": [
+        {
+            "id": "Hash32 (required)",
+            "label": "string (optional)"
+        }
+    ],
+    "response": {
+        "status": 200,
+        "body": { "updated": "integer" }
+    }
+}
