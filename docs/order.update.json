@@ -1,0 +1,15 @@
+{
+    "endpoint": "PATCH /order/update",
+    "description": "Modification: Update the relative ordering of units within their parent context. Targets the specific link rather than the unit itself.",
+    "request_body": [
+        {
+            "unitId": "32bit",
+            "linkId": "32bit",
+            "order": "integer"
+        }
+    ],
+    "response": {
+        "status": 200,
+        "body": { "updated": "integer" }
+    }
+}
