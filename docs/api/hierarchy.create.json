@@ -14,6 +14,23 @@
                         "payload": "object (optional)",
                         "order": "integer (required)",
                         "children": "recursive Hierarchy structure..."
+                    },
+                    {
+                        "mountId": "32bit",
+                        "width": "int",
+                        "depth": "int",
+                        "overrides": [
+                            {
+                                "mountId": "int32",
+                                "overrideId": "int32"
+                            }
+                        ],
+                        "overlays": [
+                            {
+                                "mountId": "int32",
+                                "overlayId": "int32"
+                            }
+                        ]
                     }
                 ]
             }

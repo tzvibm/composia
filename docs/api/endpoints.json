@@ -74,7 +74,7 @@
         },
         {
             "path": "DELETE /hierarchy/detach",
-            "desc": "Recursive Deletdetache: breaks the links starting at id",
+            "desc": "Recursive detach: breaks the links starting at id",
             "id": "32bit",
             "depth": "Optional: int, Default: all",
             "width": "Optional: int, Default: all",
@@ -82,7 +82,7 @@
         },
         {
             "path": "DELETE /hierarchy/delete",
-            "desc": "Recursive Delete: Wipes the link tree starting at id",
+            "desc": "Recursive Delete: uses links table to traverse and deletes units, prior detach required for all deleted units",
             "id": "32bit",
             "depth": "Optional: int, Default: 0",
             "width": "Optional: int, Default: 0",
