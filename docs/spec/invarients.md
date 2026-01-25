@@ -44,6 +44,13 @@ These invariants are the "Laws of Physics" for the Composia ecosystem. They are 
 * **Logic:** Keeps the SQL `IN` clause and the Stitcher's filtering logic from becoming a bottleneck as the number of users/tenants grows.
 * **Constraint:** A single request may only resolve across up to `MAX_NAMESPACES` (default: 10). This includes the `SYSTEM` namespace, the user's namespace, and any injected via `MOUNT` or `NAMESPACE` verbs.
 
+
+## 7. Root unit cannot be a mount
+
+* **Definition:** The root_unit_id provided by the client request must exist as a primary record in the units table and cannot be the target of a MOUNT instruction from an external namespace during the initial seeding phase. The root must be the "Origin of Truth" for the current execution context.
+* **Logic:** A MOUNT verb is designed to graft a foreign subtree into a local context. If the root itself is a mount, the Stitcher loses its "Point of Authority." By enforcing that the root is a standard unit, the engine guarantees a stable starting namespace and source before any recursive jumping occurs. This prevents a "Circular Root" where a system attempts to start a tree from a reference that points back to itself or another dynamic mount.
+* **Constraint:** The system must perform an initial check: SELECT label FROM units WHERE id = root_unit_id. If the ID is only found as a target of a MOUNT verb without a corresponding entry in the units table (or if the application logic identifies the ID specifically as a virtual mount alias), the request is rejected with a 400 Bad Request: Root Cannot Be Virtual.
+
 ---
 
 ### Summary of Constraints

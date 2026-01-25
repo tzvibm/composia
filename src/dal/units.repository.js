@@ -65,3 +65,29 @@ export const deleteBatch = async (ids) => {
     count: res.rowCount
   };
 };
+
+
+
+
+
+
+export const resolveTree = async (rootId, globalNs, options = {}) => {
+  const {
+    depth = 5,
+    width = 30,
+    offset = 0
+  } = options;
+
+  const query = `
+    SELECT * FROM resolve_tree(
+      $1, -- target_unit_id (VARCHAR 32)
+      $2, -- global_ns (TEXT)
+      $3, -- max_depth (INT)
+      $4, -- max_width (INT)
+      $5  -- row_offset (INT)
+    );
+  `;
+
+  const res = await db.query(query, [rootId, globalNs, depth, width, offset]);
+  return res.rows;
+};
