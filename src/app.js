@@ -2,7 +2,10 @@ import Fastify from 'fastify';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import unitRoutes from './routes/units.routes.js'; 
+import unitRoutes from './routes/units.routes.js';
+import namespaceRoutes from './routes/namespace.routes.js';
+import matrixRoutes from './routes/matrix.routes.js';
+import resolutionRoutes from './routes/resolution.routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
@@ -10,12 +13,15 @@ const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
 // Load env from root directory
 dotenv.config({ path: path.resolve(__dirname, '..', envFile) });
 
-export const fastify = Fastify({ 
-  logger: process.env.NODE_ENV !== 'test' 
+export const fastify = Fastify({
+  logger: process.env.NODE_ENV !== 'test'
 });
 
-// The Rust engine will be initialized in the Repository/DAL layer
+// Register all routes
 fastify.register(unitRoutes);
+fastify.register(namespaceRoutes);
+fastify.register(matrixRoutes);
+fastify.register(resolutionRoutes);
 
 export const start = async () => {
   try {
