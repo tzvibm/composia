@@ -19,6 +19,8 @@
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",
+    "@fastify/swagger": "^9.6.1",
+    "@fastify/swagger-ui": "^5.2.4",
     "dotenv": "^16.4.5",
     "fastify": "^5.0.0",
     "lodash": "^4.17.23",
