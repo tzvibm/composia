@@ -1,70 +1,78 @@
 import { generateHash32 } from '../utils/id.js';
-import { 
-  CreateRequestSchema, 
-  CreateResponseSchema, 
-  ReadRequestSchema, 
-  ReadResponseSchema, 
-  UpdateUnitsRequestSchema, 
+import { engine } from '../dal/db.js';
+import {
+  CreateRequestSchema,
+  CreateResponseSchema,
+  ReadRequestSchema,
+  ReadResponseSchema,
+  UpdateUnitsRequestSchema,
   UpdateResponseSchema,
-  UpdatePayloadsRequestSchema, 
+  UpdatePayloadsRequestSchema,
   UpdatePayloadsResponseSchema,
-  DeleteUnitsRequestSchema, 
+  DeleteUnitsRequestSchema,
   DeleteUnitsResponseSchema
 } from '../models/unit.model.js';
-import * as unitsRepo from '../dal/units.repository.js';
 
-export const createUnits = async (userInput) => {
+/**
+ * Create new units with generated IDs
+ */
+export const createUnits = (userInput) => {
   const validatedInput = CreateRequestSchema.parse(userInput);
 
   const unitsToCreate = validatedInput.map(item => ({
-    id: generateHash32(), 
+    id: generateHash32(),
     label: item.label,
-    payload: item.payload
+    payload: item.payload || {}
   }));
 
-  const rawRows = await unitsRepo.createUnits(unitsToCreate);
+  const rawRows = engine.put_units(unitsToCreate);
   return CreateResponseSchema.parse(rawRows);
 };
 
-
-export const getUnitsByIds = async (input) => {
-  // Zod now handles the .split(',') internally via preprocess!
+/**
+ * Get units by IDs (supports comma-separated string or array)
+ */
+export const getUnitsByIds = (input) => {
   const validatedIds = ReadRequestSchema.parse(input);
-
-  const rows = await unitsRepo.readUnits(validatedIds);
+  const rows = engine.get_units(validatedIds);
   return ReadResponseSchema.parse(rows);
 };
 
-
-export const updateUnits = async (userInput) => {
+/**
+ * Update unit labels/metadata (shallow merge)
+ */
+export const updateUnits = (userInput) => {
   const validatedInput = UpdateUnitsRequestSchema.parse(userInput);
-  
-  const updatedRows = await unitsRepo.updateUnits(validatedInput);
-
-  // Validate the rows coming back from the DB to ensure they match our Unit model
+  const updatedRows = engine.update_units(validatedInput);
   return UpdateResponseSchema.parse(updatedRows);
 };
 
-
-export const updatePayloads = async (userInput) => {
-  // 1. Validate the merge request
+/**
+ * Update unit payloads (shallow merge into existing payload)
+ */
+export const updatePayloads = (userInput) => {
   const validatedInput = UpdatePayloadsRequestSchema.parse(userInput);
 
-  // 2. Execute the JSONB merge in DAL
-  const updatedRows = await unitsRepo.updatePayloads(validatedInput);
+  // Rust update_units does shallow merge at top level
+  // For payload merge, we need to structure it properly
+  const updates = validatedInput.map(item => ({
+    id: item.id,
+    payload: item.payload
+  }));
 
-  // 3. Return the fully updated units
+  const updatedRows = engine.update_units(updates);
   return UpdatePayloadsResponseSchema.parse(updatedRows);
 };
 
-
-export const deleteUnits = async (userInput) => {
-  // 1. Validate the list of IDs
+/**
+ * Delete units by IDs
+ */
+export const deleteUnits = (userInput) => {
   const { ids } = DeleteUnitsRequestSchema.parse(userInput);
+  const deletedIds = engine.delete_units(ids);
 
-  // 2. Execute deletion
-  const result = await unitsRepo.deleteBatch(ids);
-
-  // 3. Return validated response
-  return DeleteUnitsResponseSchema.parse(result);
+  return DeleteUnitsResponseSchema.parse({
+    deleted: deletedIds,
+    count: deletedIds.length
+  });
 };

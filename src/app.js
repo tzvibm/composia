@@ -1,27 +1,34 @@
 import Fastify from 'fastify';
 import dotenv from 'dotenv';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import unitRoutes from './routes/units.routes.js'; 
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
-dotenv.config({ path: path.resolve(process.cwd(), envFile) });
 
-// TIP: Turn off logger in test mode so your terminal isn't flooded with logs
+// Load env from root directory
+dotenv.config({ path: path.resolve(__dirname, '..', envFile) });
+
 export const fastify = Fastify({ 
   logger: process.env.NODE_ENV !== 'test' 
 });
 
+// The Rust engine will be initialized in the Repository/DAL layer
 fastify.register(unitRoutes);
 
 export const start = async () => {
   try {
-    // This now correctly pulls from whichever file was loaded above
-    await fastify.listen({ 
-        port: process.env.PORT || 3000, 
-        host: '0.0.0.0' 
-    });
+    const port = process.env.PORT || 3000;
+    await fastify.listen({ port: Number(port), host: '0.0.0.0' });
+    console.log(`🚀 Composia Engine running on port ${port}`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
   }
 };
+
+// Start if executed directly
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  start();
+}

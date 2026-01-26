@@ -1,41 +1,31 @@
 {
-  "name": "composia",
+  "name": "composia-native",
   "version": "1.0.0",
   "type": "module",
-  "description": "",
-  "main": "src/kernel.js",
+  "main": "index.js",
+  "napi": {
+    "binaryName": "composia_native",
+    "packageName": "composia-native"
+  },
   "scripts": {
-    "start": "NODE_ENV=production node index.js",
-    "dev": "NODE_ENV=development node index.js",
-    "db:test-setup": "bash src/scripts/setup-test.sh",
-    "pretest": "npm run db:test-setup",
-    "test": "NODE_ENV=test vitest run",
-    "test:watch": "NODE_ENV=test vitest",
-    "test:ui": "NODE_ENV=test vitest --ui",
-    "test:coverage": "NODE_ENV=test vitest run --coverage"
+    "artifacts": "napi build --platform --release",
+    "build": "napi build --release",
+    "build:debug": "napi build",
+    "prestart": "npm run build",
+    "start": "NODE_ENV=production node src/app.js",
+    "dev": "NODE_ENV=development node src/app.js",
+    "test": "NODE_ENV=test vitest run --no-file-parallelism",
+    "test:watch": "NODE_ENV=test vitest --no-file-parallelism"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/tzvibm/composia.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/tzvibm/composia/issues"
-  },
-  "homepage": "https://github.com/tzvibm/composia#readme",
   "dependencies": {
-    "@fastify/cors": "^11.2.0",
-    "express": "^5.2.1",
-    "fastify": "^5.7.1",
-    "pg": "^8.17.1",
-    "zod": "^3.25.76"
+    "@fastify/cors": "^10.0.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^5.0.0",
+    "lodash": "^4.17.23",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^4.0.18",
-    "@vitest/ui": "^4.0.18",
-    "dotenv": "^17.2.3",
-    "vitest": "^4.0.17"
+    "@napi-rs/cli": "^3.0.0",
+    "vitest": "^2.1.0"
   }
 }

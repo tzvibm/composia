@@ -77,3 +77,4 @@ export const deleteUnits = async (request, reply) => {
     return reply.code(500).send({ error: 'Internal Server Error' });
   }
 };
+
