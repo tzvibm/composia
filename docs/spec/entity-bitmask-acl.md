@@ -1,6 +1,6 @@
 # Entity-Relationship Bitmask System
 
-## Specification v1.0
+## Specification v1.1
 
 ---
 
@@ -25,11 +25,12 @@ No types. No schema. Just paths and bits.
 
 ## 2. Path Patterns
 
-Five patterns define the entire system:
+Six patterns define the entire system:
 
 | Pattern | Purpose |
 |---------|---------|
 | `entity/rel_mask/entity` | Relationship between entities |
+| `entity/policy/entity` | Conditional relationship (code outputs rel_mask) |
 | `entity/rel_mask/cap_mask` | Capability definition (per-entity) |
 | `entity/entity/entity` | Inheritance reference |
 | `entity/rel_mask/label` | Human-readable relationship name |
@@ -51,7 +52,61 @@ The system doesn't know john is a user or slack is an app. That's business knowl
 
 ---
 
-## 4. Capability Definitions
+## 4. Policies (Conditional Relationships)
+
+```
+john/policy/slack → epoch
+```
+
+A **policy** is a conditional relationship where code evaluates context and outputs a rel_mask.
+
+Unlike static relationships (`entity/rel_mask/entity`), policies are dynamic:
+
+```
+john/0x02/slack           → static: john always has 0x02 on slack
+john/policy/slack         → dynamic: code evaluates and returns rel_mask
+```
+
+### Policy Evaluation
+
+The policy contains or references code that:
+1. Receives context (time, location, device, request attributes, etc.)
+2. Evaluates conditions
+3. Returns a rel_mask (or 0x00 for no relationship)
+
+```
+policy for john/policy/slack:
+  if time.hour >= 9 && time.hour <= 17:
+    return 0x02  // editor during work hours
+  else:
+    return 0x01  // viewer outside work hours
+```
+
+### Why Policies
+
+| Static Relationship | Policy |
+|---------------------|--------|
+| Always same rel_mask | Context-dependent rel_mask |
+| O(1) lookup | O(1) lookup + code execution |
+| No conditions | Time, location, device, etc. |
+| Deterministic | Deterministic given same context |
+
+Policies add ABAC-style conditions while preserving bitmask evaluation. The output is still a rel_mask—capability evaluation remains O(1).
+
+### Storage
+
+```
+entity/policy/entity → epoch (+ policy code reference)
+```
+
+Policy code can be:
+- Inline (small expressions)
+- Referenced (pointer to code/WASM module)
+- External (call to policy service)
+
+---
+
+## 5. Capability Definitions
 
 ```
 slack/0x02/cap_mask → epoch
@@ -70,7 +125,7 @@ No global role definitions. Each entity owns its semantics.
 
 ---
 
-## 5. Inheritance
+## 6. Inheritance
 
 ```
 entity1/entity2/entity3 → epoch
@@ -96,7 +151,7 @@ If `mary/0x04/sales` exists, john effectively has `0x04` on sales via inheritanc
 
 ---
 
-## 6. Hierarchical Scoping
+## 7. Hierarchical Scoping
 
 Entities can be scoped by prepending context:
 
@@ -108,7 +163,7 @@ John, in the context of engineering, has relationship `0x04` with slack.
 
 ---
 
-## 7. Bidirectional Storage
+## 8. Bidirectional Storage
 
 Every write is transactional on forward and reverse paths:
 
@@ -131,22 +186,27 @@ Enables O(log N) queries from either direction:
 
 ---
 
-## 8. Access Evaluation
+## 9. Access Evaluation
 
-Three lookups, left to right:
+Three to four lookups, left to right:
 
 **Query:** Can entity1 perform action on entity2?
 
 ```
 Step 1: entity1/*/entity2
         → get all existing rel_masks (direct relationships)
+        → includes static (rel_mask) and dynamic (policy)
+
+Step 1b: If policy exists (entity1/policy/entity2)
+        → execute policy code with context
+        → policy returns rel_mask (or 0x00)
 
 Step 2: entity1/entity2/*
         → if inheritance exists, get entity3
         → do step 1 for entity3 (inherited relationships)
 
 Step 3: entity2/rel_mask/cap_mask
-        → for each rel_mask from steps 1 and 2
+        → for each rel_mask from steps 1, 1b, and 2
         → if rel_mask matches, get capability bits
         → evaluate requested action against capability bits
 ```
@@ -172,7 +232,7 @@ Result: GRANTED via inheritance from mary
 
 ---
 
-## 9. Labels
+## 10. Labels
 
 Human-readable names for relationships and capabilities:
 
@@ -187,7 +247,7 @@ Labels are metadata. The system operates on bits, not names.
 
 ---
 
-## 10. Implementation
+## 11. Implementation
 
 ### Storage
 
@@ -203,6 +263,8 @@ Deployment choice. Examples:
 LMDB
 ├── relationships/    (entity/rel_mask/entity)
 ├── reverse/          (entity/rel_mask/entity reversed)
+├── policies/         (entity/policy/entity)
+├── policies_rev/     (reversed)
 ├── inheritance/      (entity/entity/entity)
 ├── inheritance_rev/  (reversed)
 ├── capabilities/     (entity/rel_mask/cap_mask)
@@ -213,7 +275,7 @@ Types (user, app, team, etc.) are implicit—known to the business layer, not en
 
 ---
 
-## 11. Complexity
+## 12. Complexity
 
 | Operation | Complexity |
 |-----------|------------|
@@ -233,7 +295,7 @@ Types (user, app, team, etc.) are implicit—known to the business layer, not en
 
 ---
 
-## 12. Epochs
+## 13. Epochs
 
 Every entry stores an epoch as its value:
 
@@ -250,7 +312,7 @@ Epochs provide:
 
 ---
 
-## 13. Properties
+## 14. Properties
 
 | Property | Mechanism |
 |----------|-----------|
@@ -259,6 +321,7 @@ Epochs provide:
 | **O(log N) access** | LMDB B-tree lookups |
 | **O(1) evaluation** | Bitmask AND operation |
 | **Per-entity semantics** | Each entity defines its own capability mappings |
+| **Conditional access** | Policies output rel_masks based on context |
 | **Inheritance** | Path reference, not graph traversal |
 | **Deterministic** | Epochs order all operations |
 | **ACID** | Transactional forward/reverse writes |
@@ -266,7 +329,7 @@ Epochs provide:
 
 ---
 
-## 14. Comparison
+## 15. Comparison
 
 | Traditional Systems | This System |
 |--------------------|-------------|
@@ -275,13 +338,14 @@ Epochs provide:
 | Named roles | Bitmasks |
 | Role-capability tables | `entity/rel_mask/cap_mask` paths |
 | Inheritance graphs | `entity/entity/entity` references |
-| Policy languages | Bitmask AND |
+| ABAC policy languages | Policies that output bitmasks |
+| Complex policy evaluation | Bitmask AND (policy output → bitmask) |
 | Combinatorial scaling | Linear scaling |
 | Schema migrations | No schema |
 
 ---
 
-## 15. Use Cases
+## 16. Use Cases
 
 Because it's just `id/bits/id`, the system can model:
 
@@ -299,18 +363,19 @@ The system doesn't know what it's modeling. It stores paths and bits.
 
 ---
 
-## 16. Summary
+## 17. Summary
 
-The entire system is five path patterns:
+The entire system is six path patterns:
 
 ```
-entity/rel_mask/entity           → relationship
+entity/rel_mask/entity           → relationship (static)
+entity/policy/entity             → relationship (conditional, code outputs rel_mask)
 entity/rel_mask/cap_mask         → capability definition
 entity/entity/entity             → inheritance
 entity/rel_mask/label            → relationship name
 entity/cap_mask/label            → capability name
 ```
 
-Forward + reverse stored atomically. LMDB for O(log N) lookup. Bitmasks for O(1) evaluation. Epochs for ordering. Types are business context, not system schema.
+Forward + reverse stored atomically. LMDB for O(log N) lookup. Bitmasks for O(1) evaluation. Epochs for ordering. Policies for conditional access. Types are business context, not system schema.
 
-**The insight:** Remove everything except paths and bits. Let the business layer assign meaning.
+**The insight:** Remove everything except paths and bits. Let the business layer assign meaning. Use policies when context-dependent decisions are needed—they still output bitmasks, preserving O(1) capability evaluation.
