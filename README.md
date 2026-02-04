@@ -1,81 +1,119 @@
-# 🌌 Composia
+# Composia
 
-**The Sovereign Composition Engine.**
+A backend orchestration engine that assembles hierarchical data structures (trees) dynamically using an **Instruction Matrix**. It stitches atomic units of data based on caller authority (Namespaces).
 
-Composia is a backend-driven orchestration system that assembles complex, hierarchical data structures (trees) on the fly. Unlike traditional fixed-hierarchy databases, Composia uses an **Instruction Matrix** to "stitch" together atomic units of data based on the caller's authority (Namespace).
+## Tech Stack
 
----
+- **Runtime:** Node.js + Fastify
+- **Storage:** LMDB (embedded key-value store) via Rust native module (NAPI-RS)
+- **Validation:** Zod schemas
+- **Docs:** OpenAPI/Swagger at `/docs`
 
-## 🏗 System Architecture
+## Quick Start
 
-Composia follows a strict "Nervous System" flow, from the external request down to the recursive database engine.
+```bash
+npm install
+npm run build      # Build Rust native module
+npm start          # Start server on PORT=3000
+npm run dev        # Development mode
+npm test           # Run tests
+```
 
-### 1. The API Layer (The Request)
+## Architecture
 
-The entry point for all compositions.
+```
+API Layer (Fastify)  →  Service Layer  →  DAL  →  Rust Engine (LMDB)
+    routes/              services/        dal/       src/lib.rs
+    controllers/
+```
 
-* **Input:** A `Root Unit ID` and a set of `Active Namespaces`.
-* **Role:** Validates the environment invariants (Max Depth, Max Width) and passes the "Sovereign Context" to the service layer.
+### Databases (LMDB)
 
-### 2. The Service Layer / Stitcher (The Brain)
+- **units**: Key-value store (`id` → JSON payload with label)
+- **matrix**: Instruction relationships (`namespace:source:verb:target:order` → `{order, verb_value}`)
+- **namespaces**: Namespace registry (`namespace_id` → metadata)
 
-The core logic resides here. It manages the lifecycle of the composition.
+## Core Concepts
 
-* **Flow Control:** Orchestrates the transition from raw database rows to a nested JSON tree.
-* **Access Control:** Enforces sovereignty. If a namespace isn't in the "Active" list, its instructions are invisible, effectively changing the structure of the data for different users/roles.
+### Units
 
-### 3. The CTE Engine (The Heart)
+Atomic data containers with a 32-character hex ID, a label, and a JSON payload.
 
-A Recursive Common Table Expression (CTE) that performs a **Hydrated Walk** of the data.
+### Namespaces
 
-* **Vertical Traversal:** Moves from `source` (parent) to `target` (child).
-* **Look-Ahead Pruning:** Evaluates "Logic Verbs" (`HIDE`, `SOLO`) before expanding branches to ensure the engine only fetches what is necessary.
+User-provided unique identifiers for hierarchies. When resolving, the caller specifies which namespace to query. Access control is structural—different namespaces see different tree compositions from the same underlying units.
 
-### 4. The Database (The Memory)
+### Instruction Matrix
 
-The persistence layer is split into two specialized tables:
+Defines relationships between units via verbs:
 
-* **Units:** Immutable "Atoms" containing raw JSON payloads and labels.
-* **Instruction Matrix:** The "Instruction Set" (Registers). It defines the relationships between units using `source`, `target`, `verb`, `value`, `namespace`, and `order`.
+| Verb | Purpose | verb_value |
+|------|---------|------------|
+| `UNIT` | Parent-child containment | — |
+| `HIDE` | Suppress unit from resolution | — |
+| `REPLACE` | Substitute one unit for another | replacement unit ID |
+| `OVERLAY` | Merge additional payload data | overlay unit ID |
+| `MOUNT` | Attach a namespace to a unit | namespace ID |
 
----
+### Mount Namespaces
 
-## ⚡ The Execution Pipeline (The Blueprint)
+A unit with `MOUNT` verb carries its own namespace. During resolution, both the request namespace and mount namespace are checked, enabling cross-namespace composition.
 
-When a request is made, the system executes the following phases for every node:
+## Resolution Cycle
 
-1. **Context Collection:** Gather all instructions belonging to the current unit and active namespaces.
-2. **Logic & Pruning:** Apply "Stopper" verbs (e.g., `HIDE` an instruction or `SOLO` a namespace) to filter the execution path.
-3. **Hydration:** Fetch the actual `payload` from the Units table for all surviving targets.
-4. **Modification:** Apply `MERGE` or `OVERLAY` operations to the payload based on the instruction value.
-5. **Recursion:** Treat the children as new roots and repeat until the leaf nodes are reached or Invariants are hit.
+The resolver executes an 8-step cycle for each unit:
 
----
+1. **Mount Check** — Detect if unit has a `MOUNT` verb (carries its own namespace)
+2. **Hide Check** — Check both namespaces for `HIDE` instruction
+3. **Replacement** — Apply `REPLACE` verbs (mount namespace first, then request namespace)
+4. **Overlay Retrieval** — Gather `OVERLAY` instructions from both namespaces
+5. **Merge** — Apply overlays in order (mount overlays first, request overlays override)
+6. **Structure Update** — Build final unit object with merged payload
+7. **Width Limitation** — Get child members respecting width limits and offset
+8. **Recurse** — Process children until depth limit reached
 
-## 🛡 Security & Access Control: Sovereignty
+## API Endpoints
 
-In Composia, **Access Control is Structural**.
-Instead of simple "Allow/Deny" permissions on a row, namespaces allow different authorities to redefine the tree.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/units` | Create units |
+| GET | `/units/:id` | Get unit by ID |
+| PATCH | `/units` | Update units |
+| DELETE | `/units` | Delete units |
+| POST | `/namespaces` | Register namespace |
+| GET | `/namespaces` | List namespaces |
+| GET | `/namespaces/:id` | Get namespace |
+| DELETE | `/namespaces/:id` | Delete namespace |
+| POST | `/matrix/link` | Create matrix entry |
+| DELETE | `/matrix/unlink` | Delete matrix entry |
+| GET | `/matrix/targets` | Get targets for source/verb |
+| POST | `/resolve` | Resolve hierarchy |
+| GET | `/health` | Health check |
 
-* **Admin Namespace:** May see a "Delete" button unit as a child of a dashboard.
-* **User Namespace:** May have that same child "Hidden" via a `HIDE` instruction.
-The data remains the same; the **Composition** changes.
+Full API documentation available at `http://localhost:3000/docs` when running.
 
----
+## System Invariants
 
-## 🛠 Tech Stack
+Environment-level limits prevent runaway recursion:
 
-* **Language:** TypeScript / Node.js
-* **Database:** PostgreSQL (Recursive CTEs, JSONB)
-* **Architecture:** Instruction-based Composition
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `MAX_DEPTH` | 100 | Maximum recursion depth |
+| `MAX_WIDTH` | 10 | Maximum children per node |
+| `MAX_OVERLAYS` | 5 | Maximum overlay merges per unit |
 
----
+## Example: Resolution Request
 
-## 🚥 System Invariants
+```bash
+curl -X POST http://localhost:3000/resolve \
+  -H "Content-Type: application/json" \
+  -d '{
+    "namespace": "admin_view",
+    "unit_id": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+    "depth": 3,
+    "width": 10,
+    "include_ops": true
+  }'
+```
 
-To prevent infinite loops and memory exhaustion, the system enforces the following environment-level limits:
-
-* `MAX_DEPTH`: Maximum levels of recursion.
-* `MAX_WIDTH`: Maximum children per node.
-* `MAX_NAMESPACE`: Maximum active authorities per request.
-* `MAX_OVERLAYS`: Maximum merge operations per unit.
+Response includes the resolved hierarchy tree and optionally an operations log showing each step of the resolution cycle.
