@@ -174,12 +174,30 @@ Composia handles what it's good at — **shared hierarchical structures with per
 personal content (`{ checked: true }`) stored as an OVERLAY, same as notes or photos.
 Everything personal is an overlay. One mechanism for all user content on shared items.
 
-**No mount chaining — no infinite recursion.** Users only mount list namespaces, never
-other user namespaces. The product API enforces this: `subscribe` always mounts a
-`list_{id}` namespace, never a `user_{id}` namespace. Composia's existing constraint
-("the hierarchy can only mount a non-mounted unit via `verb=UNIT`") provides a second
-safety net at the engine level — even if bad data gets in, a mounted namespace cannot
-itself be mounted, preventing recursive loops.
+**Recursive mount safety — preventing infinite loops.** Users only mount list namespaces,
+never other user namespaces. But a list's hierarchy can contain items that themselves
+mount other list namespaces, which can contain further mounts, and so on. This creates
+two risks:
+
+1. **Unbounded depth** — mounts nested arbitrarily deep.
+   → Already handled: `MAX_DEPTH` stops resolution regardless of mount nesting.
+
+2. **Circular mounts** — list A contains a mount to list B, which contains a mount
+   back to list A. Resolution would bounce between them until hitting depth limit,
+   wasting work and returning duplicate/confusing results.
+   → **Requires cycle detection:** the resolution engine must track a `visited_namespaces`
+   set for each resolution path. When entering a MOUNT, check if the mount namespace
+   is already in the set. If so, skip it (treat as a dead end, log it in operations).
+
+```
+Resolution path tracking:
+  resolve(user_A) → enters list_456 [visited: {user_A, list_456}]
+    → item_2 mounts list_789 [visited: {user_A, list_456, list_789}]
+      → item_4 mounts list_456 → ALREADY VISITED → skip (cycle detected)
+```
+
+This is a Composia engine change — the resolution service needs a `visited` set
+threaded through the recursive calls. The product API doesn't need to change.
 
 ### What lives in Capbit (authorization engine)
 
