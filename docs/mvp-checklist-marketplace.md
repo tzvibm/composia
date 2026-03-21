@@ -174,11 +174,15 @@ Composia handles what it's good at — **shared hierarchical structures with per
 personal content (`{ checked: true }`) stored as an OVERLAY, same as notes or photos.
 Everything personal is an overlay. One mechanism for all user content on shared items.
 
-**No infinite recursion risk.** Resolution is client-driven, one level at a time — the
-server resolves a unit and its immediate children (breadth), then stops. The client
-requests the next level of depth when needed. The server never recursively traverses
-the full tree, so circular mounts can't cause loops. Worst case: the client navigates
-in a circle and sees the same items again, which is a UI/UX concern, not an engine one.
+**No infinite recursion risk.** Resolution returns a shallow, bounded slice:
+- `MAX_WIDTH` (10) visible units per level
+- `MAX_DEPTH` (2) levels deep per request
+- Client pages with `offset` for more breadth, explicit requests for more depth
+
+Mounted items appear as units but their children aren't fetched until the user
+drills into them. The server never traverses beyond what was asked for.
+Circular mounts can't cause loops — worst case the client navigates in a
+circle and sees the same items again, which is a UI concern, not an engine one.
 
 ### What lives in Capbit (authorization engine)
 
