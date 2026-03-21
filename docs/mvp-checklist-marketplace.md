@@ -174,30 +174,11 @@ Composia handles what it's good at — **shared hierarchical structures with per
 personal content (`{ checked: true }`) stored as an OVERLAY, same as notes or photos.
 Everything personal is an overlay. One mechanism for all user content on shared items.
 
-**Recursive mount safety — preventing infinite loops.** Users only mount list namespaces,
-never other user namespaces. But a list's hierarchy can contain items that themselves
-mount other list namespaces, which can contain further mounts, and so on. This creates
-two risks:
-
-1. **Unbounded depth** — mounts nested arbitrarily deep.
-   → Already handled: `MAX_DEPTH` stops resolution regardless of mount nesting.
-
-2. **Circular mounts** — list A contains a mount to list B, which contains a mount
-   back to list A. Resolution would bounce between them until hitting depth limit,
-   wasting work and returning duplicate/confusing results.
-   → **Requires cycle detection:** the resolution engine must track a `visited_namespaces`
-   set for each resolution path. When entering a MOUNT, check if the mount namespace
-   is already in the set. If so, skip it (treat as a dead end, log it in operations).
-
-```
-Resolution path tracking:
-  resolve(user_A) → enters list_456 [visited: {user_A, list_456}]
-    → item_2 mounts list_789 [visited: {user_A, list_456, list_789}]
-      → item_4 mounts list_456 → ALREADY VISITED → skip (cycle detected)
-```
-
-This is a Composia engine change — the resolution service needs a `visited` set
-threaded through the recursive calls. The product API doesn't need to change.
+**No infinite recursion risk.** Resolution is client-driven, one level at a time — the
+server resolves a unit and its immediate children (breadth), then stops. The client
+requests the next level of depth when needed. The server never recursively traverses
+the full tree, so circular mounts can't cause loops. Worst case: the client navigates
+in a circle and sees the same items again, which is a UI/UX concern, not an engine one.
 
 ### What lives in Capbit (authorization engine)
 
