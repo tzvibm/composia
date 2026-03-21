@@ -29,10 +29,6 @@ thousands subscribe, each tracks their own progress and adds personal notes/phot
 - Edit list structure and items
 - See subscriber count
 
-### Social
-- Comment on a list or specific item
-- See others' comments
-
 ---
 
 ## Product API
@@ -119,16 +115,6 @@ PUT /lists/:listId/items/:itemId/personal
 The overlay is **open-ended JSON** — the frontend can put whatever it wants in there.
 Composia merges it onto the shared item during resolution. One verb, any content type.
 
-### Comments (auth required)
-
-```
-GET    /lists/:listId/comments                         → list-level
-POST   /lists/:listId/comments                         → { text }
-GET    /lists/:listId/items/:itemId/comments           → item-level
-POST   /lists/:listId/items/:itemId/comments           → { text }
-DELETE /lists/:listId/comments/:commentId               → delete own comment
-```
-
 ---
 
 ## Data Model
@@ -153,7 +139,7 @@ Everything personal is an overlay. One mechanism for all user content on shared 
 
 ### What lives in a relational DB (Postgres or SQLite)
 
-Everything that Composia wasn't designed for — users, progress, social, discovery.
+Everything that Composia wasn't designed for — users and discovery.
 
 ```sql
 -- Users & Auth
@@ -189,29 +175,9 @@ subscriptions (
   PRIMARY KEY (user_id, list_id)
 )
 
--- No progress table — checkoffs live in Composia as OVERLAYs,
--- same as notes, photos, and any other personal content.
-
--- Comments
-comments (
-  id              TEXT PRIMARY KEY,
-  user_id         TEXT REFERENCES users(id),
-  list_id         TEXT REFERENCES lists(id),
-  item_id         TEXT,               -- NULL = list-level comment
-  text            TEXT,
-  created_at      TIMESTAMP
-)
-
--- File uploads
-uploads (
-  id              TEXT PRIMARY KEY,
-  user_id         TEXT REFERENCES users(id),
-  list_id         TEXT REFERENCES lists(id),
-  item_id         TEXT,
-  file_url        TEXT,
-  file_name       TEXT,
-  created_at      TIMESTAMP
-)
+-- No progress/comments/uploads tables in MVP.
+-- Checkoffs and personal content live in Composia as OVERLAYs.
+-- File upload URL tracking can be added later if needed.
 ```
 
 ---
@@ -281,14 +247,12 @@ uploads (
 - [ ] Categories
 - [ ] Personal items on subscribed lists (Composia UNIT in user namespace)
 - [ ] Progress summary (computed: count resolved items where overlay has checked=true)
-
-### Phase 3: Social + Polish (week 4)
-- [ ] Comments (list-level and item-level)
-- [ ] File uploads (S3 or local storage)
 - [ ] Subscriber counts
 - [ ] Basic rate limiting
 
 ### Not in MVP
+- Social features (comments, discussions) — integrate open-source platform later
+- File uploads
 - Ratings/reviews
 - Following other users
 - List forking/remixing
@@ -304,8 +268,7 @@ uploads (
 |---|---|---|
 | Relational DB | SQLite (better-sqlite3) | Zero setup, good enough for MVP, easy to migrate to Postgres later |
 | Auth | JWT (jsonwebtoken) | Simple, stateless, well-understood |
-| File uploads | Local disk → S3 later | MVP simplicity |
-| Social platform | Defer to Phase 3 | Comments are the minimum viable social feature |
+| Social | Post-MVP | Integrate open-source platform (Discourse, Matrix, ActivityPub, etc.) rather than building from scratch. Link discussions to units/collections via payload references. Map Composia users to social platform users. |
 | Frontend | Out of scope for this doc | Could be React/Next.js, mobile, etc. |
 
 ---
@@ -315,4 +278,41 @@ uploads (
 1. ~~Should "checked off" items be hidden or just marked?~~ → **Resolved.** Checks are just personal content (OVERLAY with `{ checked: true }`), same as notes or photos. No special treatment.
 2. **Can users re-order items in a subscribed list?** → Not in MVP. They see the creator's order.
 3. **Should personal items be mixed into the list or shown separately?** → Mixed in, appended at the end of the group they're added to.
-4. **What's the social platform integration?** → Start with native comments. Open-source social (e.g., ActivityPub/Mastodon-style) is a future consideration.
+4. **What's the social platform integration?** → Post-MVP. Integrate an open-source platform (Discourse, Matrix, ActivityPub, etc.) rather than building social from scratch. Each unit or collection of units gets a linked discussion thread. Composia users map to social platform users.
+
+---
+
+## Future: Social Platform Integration (Post-MVP)
+
+Rather than building comments/discussions/reactions from scratch, integrate an
+open-source social platform. The integration pattern:
+
+```
+Composia Unit or Collection of Units
+       │
+       │  unit payload stores: { social_thread_id: "abc123" }
+       │
+       ▼
+Open-source social platform (Discourse / Matrix / ActivityPub-based)
+       │
+       │  thread/channel/post linked to the unit(s)
+       │
+       ▼
+Users discuss, comment, react — all handled by the social platform
+
+User identity mapping:
+  Composia user (user_{id}) ←→ Social platform user account
+  Created at registration time, SSO or token-based auth sync
+```
+
+**Candidate platforms to evaluate:**
+- **Discourse** — forum-style, great API, embeddable, mature moderation tools
+- **Matrix (Element)** — real-time chat, decentralized, good for item-level discussions
+- **Lemmy / Kbin** — Reddit-style, ActivityPub-based, good for list-level discussions
+- **Custom ActivityPub** — federated, future-proof, but more integration work
+
+**What Composia needs to support this:**
+- A `social_thread_id` field in unit payloads (or a dedicated link)
+- User registration flow that also creates the social platform account
+- An API endpoint or webhook to create a discussion thread when a list is published
+- Frontend embeds the social platform's UI (most support iframe/embed or API-driven rendering)
