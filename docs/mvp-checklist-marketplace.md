@@ -133,7 +133,7 @@ Composia merges it onto the shared item during resolution. One verb, any content
               ▼                 ▼                  ▼
      ┌────────────────┐ ┌─────────────┐  ┌──────────────┐
      │    Composia     │ │   Capbit     │  │   SQLite      │
-     │  (fjall)        │ │  (fjall)     │  │               │
+     │  (RocksDB)      │ │  (RocksDB)   │  │               │
      │                 │ │              │  │               │
      │ • Hierarchies   │ │ • Who can    │  │ • User        │
      │ • Units/items   │ │   do what    │  │   profiles    │
@@ -146,8 +146,11 @@ Composia merges it onto the shared item during resolution. One verb, any content
       + personalization   (atomized tuples)  (relational)
 ```
 
-All three use embedded storage (no external DB servers). Composia and Capbit
-both run on fjall. SQLite via better-sqlite3. Everything in-process.
+**Pure Node.js stack.** No Rust, no native module compilation, no NAPI bindings.
+Composia and Capbit both rewritten in JavaScript on top of RocksDB (via `rocksdb` npm
+or `rocks-level`). RocksDB supports concurrent writes and column families — Composia
+and Capbit can share one RocksDB instance with separate column families for isolation.
+SQLite via better-sqlite3 for relational queries. Everything in-process, embedded.
 
 ---
 
@@ -307,10 +310,18 @@ subscriptions (
 
 ## MVP Scope — What to Build First
 
-### Phase 0: Engine Migration
-- [ ] Migrate Composia Rust engine from LMDB (heed) to fjall
-- [ ] Verify all existing tests pass on fjall
-- [ ] Integrate Capbit as a dependency (or embed its auth logic)
+### Phase 0: Engine Migration (Rust → Node.js, LMDB → RocksDB)
+- [ ] Replace Rust native module (`src/lib.rs`) with pure Node.js engine on RocksDB
+  - RocksDB column families: `units`, `matrix`, `namespaces`
+  - Same key format, same operations, just JavaScript instead of Rust
+  - Remove `Cargo.toml`, `src/lib.rs`, `@napi-rs/cli` dependency
+  - Add `rocksdb` (or `rocks-level`) npm dependency
+- [ ] Port Capbit from Rust to Node.js on RocksDB
+  - Column families: `subjects`, `subjects_rev`, `objects`, `inherits`, `inherits_by_obj`, `inherits_by_parent`
+  - Same tuple-based auth logic, same bitmask resolution
+  - Can share the same RocksDB instance as Composia (separate column families)
+- [ ] Verify all existing Composia tests pass on the new engine
+- [ ] Update `src/dal/db.js` to initialize RocksDB instead of Rust NAPI module
 
 ### Phase 1: Core (week 1-2)
 - [ ] Add SQLite (via better-sqlite3) for user profiles, list metadata, subscriptions
@@ -347,9 +358,11 @@ subscriptions (
 
 | Decision | Choice | Why |
 |---|---|---|
-| Composia storage engine | **fjall** (migrate from LMDB) | LMDB is single-writer — blocks concurrent users. fjall supports concurrent writes and is already used in Capbit. Unifies the storage stack. |
+| Language | **Pure Node.js** | No Rust, no NAPI, no native compilation. One language for everything. Simpler to develop, debug, and deploy. |
+| Storage engine | **RocksDB** (via `rocksdb` npm or `rocks-level`) | Concurrent writes (LMDB was single-writer). Column families for data isolation. Battle-tested. Good Node.js bindings. |
+| DB topology | **One RocksDB instance, column families** | Composia data (units, matrix, namespaces) and Capbit data (subjects, objects, inherits) each get their own column family. Single DB path, single process. |
 | Authentication | JWT (jsonwebtoken) | Identity only — who you are. Stateless, well-understood. |
-| Authorization | **Capbit** (github.com/tzvibm/capbit) | Granular unit-level permissions as atomized tuples. No schema blobs. Same embedded DB pattern (fjall). Permission changes are tuple writes, not code deploys. |
+| Authorization | **Capbit** (github.com/tzvibm/capbit) — ported to JS | Granular unit-level permissions as atomized tuples. Ported from Rust to Node.js on RocksDB. Permission changes are tuple writes, not code deploys. |
 | Discovery DB | SQLite (better-sqlite3) | Marketplace search/browse metadata. Zero setup, easy to migrate to Postgres later. |
 | Social | Post-MVP | Integrate open-source platform. Link discussions to units via payload references. |
 | Frontend | Out of scope for this doc | Could be React/Next.js, mobile, etc. |
