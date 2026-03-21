@@ -174,6 +174,13 @@ Composia handles what it's good at — **shared hierarchical structures with per
 personal content (`{ checked: true }`) stored as an OVERLAY, same as notes or photos.
 Everything personal is an overlay. One mechanism for all user content on shared items.
 
+**No mount chaining — no infinite recursion.** Users only mount list namespaces, never
+other user namespaces. The product API enforces this: `subscribe` always mounts a
+`list_{id}` namespace, never a `user_{id}` namespace. Composia's existing constraint
+("the hierarchy can only mount a non-mounted unit via `verb=UNIT`") provides a second
+safety net at the engine level — even if bad data gets in, a mounted namespace cannot
+itself be mounted, preventing recursive loops.
+
 ### What lives in Capbit (authorization engine)
 
 Capbit handles granular, unit-level authorization. Both relationships and permission
