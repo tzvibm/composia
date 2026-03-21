@@ -33,7 +33,7 @@ thousands subscribe, each tracks their own progress and adds personal notes/phot
 
 ## Product API
 
-All endpoints prefixed with `/api`. Auth via JWT Bearer token.
+All endpoints prefixed with `/api`. Auth via JWT Bearer token + Capbit for authorization.
 
 ### Auth
 
@@ -43,6 +43,9 @@ POST   /auth/login             { email, password } → { token }
 GET    /me                     → user profile
 PATCH  /me                     → update profile
 ```
+
+**Identity vs Authorization:** JWT handles *who you are* (authentication). Capbit handles
+*what you can do* (authorization) — down to individual units/items. See Authorization section below.
 
 ### Marketplace (public, no auth required)
 
@@ -117,6 +120,37 @@ Composia merges it onto the shared item during resolution. One verb, any content
 
 ---
 
+## Architecture — Three Engines
+
+```
+                         ┌──────────────┐
+                         │  Product API  │  Fastify — speaks user language
+                         │  (JWT auth)   │
+                         └──────┬───────┘
+                                │
+              ┌─────────────────┼─────────────────┐
+              │                 │                  │
+              ▼                 ▼                  ▼
+     ┌────────────────┐ ┌─────────────┐  ┌──────────────┐
+     │    Composia     │ │   Capbit     │  │   SQLite      │
+     │  (fjall)        │ │  (fjall)     │  │               │
+     │                 │ │              │  │               │
+     │ • Hierarchies   │ │ • Who can    │  │ • User        │
+     │ • Units/items   │ │   do what    │  │   profiles    │
+     │ • Namespaces    │ │ • Per-unit   │  │ • List        │
+     │ • Mounts        │ │   granularity│  │   metadata    │
+     │ • Overlays      │ │ • Role masks │  │ • Discovery   │
+     │ • Resolution    │ │ • Grants     │  │ • Subscriptions│
+     └────────────────┘ └─────────────┘  └──────────────┘
+      hierarchical data   authorization    search/browse
+      + personalization   (atomized tuples)  (relational)
+```
+
+All three use embedded storage (no external DB servers). Composia and Capbit
+both run on fjall. SQLite via better-sqlite3. Everything in-process.
+
+---
+
 ## Data Model
 
 ### What lives in Composia (hierarchical data engine)
@@ -137,12 +171,53 @@ Composia handles what it's good at — **shared hierarchical structures with per
 personal content (`{ checked: true }`) stored as an OVERLAY, same as notes or photos.
 Everything personal is an overlay. One mechanism for all user content on shared items.
 
-### What lives in a relational DB (Postgres or SQLite)
+### What lives in Capbit (authorization engine)
 
-Everything that Composia wasn't designed for — users and discovery.
+Capbit handles granular, unit-level authorization. Both relationships and permission
+semantics are atomized tuples — no schema blobs, no computed rules.
+
+```
+SUBJECTS:  (subject, object, role) → granted/revoked
+OBJECTS:   (object, role)          → permission bitmask
+INHERITS:  (object, role)          → parent role chain
+```
+
+**Marketplace authorization model:**
+
+```
+# When a user creates a list:
+OBJECTS:   (list_456, owner)   → can_read | can_write | can_delete | can_publish | can_grant
+OBJECTS:   (list_456, editor)  → can_read | can_write | can_add_items
+OBJECTS:   (list_456, viewer)  → can_read | can_check | can_overlay_personal
+INHERITS:  (list_456, editor)  → inherits (list_456, viewer)
+INHERITS:  (list_456, owner)   → inherits (list_456, editor)
+SUBJECTS:  (user_123, list_456, owner) → granted
+
+# When a user subscribes:
+SUBJECTS:  (user_789, list_456, viewer) → granted
+
+# Unit-level override (e.g. grant edit on a specific item):
+OBJECTS:   (item_abc, editor)  → can_read | can_write
+SUBJECTS:  (user_789, item_abc, editor) → granted
+```
+
+**Permission check flow:**
+1. JWT middleware extracts user ID from token
+2. Product API calls Capbit: `auth(user_id, object_id, required_permission)`
+3. Capbit resolves: subject roles → bitmask lookup → bitwise OR → check bit
+4. No schema parsing, no rule evaluation — just tuple lookups
+
+**Key advantage over JWT-only or RBAC:**
+- Permissions are granular to individual units/items, not just lists
+- Changing what a role means is a single tuple write, not a code change
+- A creator can grant specific users edit access to specific items
+
+### What lives in SQLite (discovery + user profiles)
+
+SQLite stores what neither Composia nor Capbit handles — searchable metadata and credentials.
 
 ```sql
--- Users & Auth
+-- User profiles & credentials
 users (
   id              TEXT PRIMARY KEY,   -- uuid
   email           TEXT UNIQUE,
@@ -167,17 +242,13 @@ lists (
   updated_at      TIMESTAMP
 )
 
--- Subscriptions
+-- Subscriptions (also mirrored as Capbit grants)
 subscriptions (
   user_id         TEXT REFERENCES users(id),
   list_id         TEXT REFERENCES lists(id),
   subscribed_at   TIMESTAMP,
   PRIMARY KEY (user_id, list_id)
 )
-
--- No progress/comments/uploads tables in MVP.
--- Checkoffs and personal content live in Composia as OVERLAYs.
--- File upload URL tracking can be added later if needed.
 ```
 
 ---
@@ -190,6 +261,8 @@ subscriptions (
 1. POST /lists { title: "Home Buying Checklist", category: "home" }
    → creates row in `lists` table
    → creates Composia namespace "list_{id}"
+   → creates Capbit roles for list (owner/editor/viewer bitmasks)
+   → grants creator owner role: (user_id, list_id, owner)
 
 2. POST /lists/:id/items { title: "Get pre-approved for mortgage", order: 1 }
    → creates Composia unit with payload { title, description }
@@ -205,6 +278,7 @@ subscriptions (
 ```
 1. POST /lists/:id/subscribe
    → inserts into subscriptions table
+   → creates Capbit grant: (user_id, list_id, viewer) → granted
    → creates Composia MOUNT: user_namespace:root:MOUNT:list_namespace
 
 2. GET /lists/:id
@@ -233,12 +307,19 @@ subscriptions (
 
 ## MVP Scope — What to Build First
 
+### Phase 0: Engine Migration
+- [ ] Migrate Composia Rust engine from LMDB (heed) to fjall
+- [ ] Verify all existing tests pass on fjall
+- [ ] Integrate Capbit as a dependency (or embed its auth logic)
+
 ### Phase 1: Core (week 1-2)
-- [ ] Add SQLite (via better-sqlite3) for users, lists, subscriptions
+- [ ] Add SQLite (via better-sqlite3) for user profiles, list metadata, subscriptions
 - [ ] Auth endpoints (register, login, JWT middleware)
-- [ ] List CRUD (create, edit, delete, publish)
+- [ ] Capbit integration — create roles/grants on list creation, subscription, etc.
+- [ ] Auth middleware: JWT for identity → Capbit for permission check on every request
+- [ ] List CRUD (create, edit, delete, publish) — with Capbit owner/editor checks
 - [ ] Item CRUD (add, edit, reorder, delete) — wraps Composia unit/matrix ops
-- [ ] Subscribe/unsubscribe — wraps Composia MOUNT
+- [ ] Subscribe/unsubscribe — Composia MOUNT + Capbit viewer grant
 - [ ] Personal content endpoint (check, notes, photos — all via Composia OVERLAY)
 - [ ] Personalized list view — Composia resolve (overlays merged automatically)
 
@@ -266,9 +347,11 @@ subscriptions (
 
 | Decision | Choice | Why |
 |---|---|---|
-| Relational DB | SQLite (better-sqlite3) | Zero setup, good enough for MVP, easy to migrate to Postgres later |
-| Auth | JWT (jsonwebtoken) | Simple, stateless, well-understood |
-| Social | Post-MVP | Integrate open-source platform (Discourse, Matrix, ActivityPub, etc.) rather than building from scratch. Link discussions to units/collections via payload references. Map Composia users to social platform users. |
+| Composia storage engine | **fjall** (migrate from LMDB) | LMDB is single-writer — blocks concurrent users. fjall supports concurrent writes and is already used in Capbit. Unifies the storage stack. |
+| Authentication | JWT (jsonwebtoken) | Identity only — who you are. Stateless, well-understood. |
+| Authorization | **Capbit** (github.com/tzvibm/capbit) | Granular unit-level permissions as atomized tuples. No schema blobs. Same embedded DB pattern (fjall). Permission changes are tuple writes, not code deploys. |
+| Discovery DB | SQLite (better-sqlite3) | Marketplace search/browse metadata. Zero setup, easy to migrate to Postgres later. |
+| Social | Post-MVP | Integrate open-source platform. Link discussions to units via payload references. |
 | Frontend | Out of scope for this doc | Could be React/Next.js, mobile, etc. |
 
 ---
