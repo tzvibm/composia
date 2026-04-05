@@ -151,7 +151,15 @@ export class Engine {
 
   async getNeighbors(noteId, depth = 1) {
     const visited = new Set();
+    const edgeSet = new Set();
     const graph = { nodes: [], edges: [] };
+
+    function addEdge(source, target) {
+      const key = `${source}→${target}`;
+      if (edgeSet.has(key)) return;
+      edgeSet.add(key);
+      graph.edges.push({ source, target });
+    }
 
     const traverse = async (id, currentDepth) => {
       if (visited.has(id) || currentDepth > depth) return;
@@ -164,18 +172,28 @@ export class Engine {
 
       const forward = await this.getForwardLinks(id);
       for (const link of forward) {
-        graph.edges.push({ source: id, target: link.target });
         await traverse(link.target, currentDepth + 1);
       }
 
       const back = await this.getBacklinks(id);
       for (const link of back) {
-        graph.edges.push({ source: link.source, target: id });
         await traverse(link.source, currentDepth + 1);
       }
     };
 
     await traverse(noteId, 0);
+
+    // Now add edges only between nodes that exist in the graph
+    const nodeIds = new Set(graph.nodes.map(n => n.id));
+    for (const id of nodeIds) {
+      const forward = await this.getForwardLinks(id);
+      for (const link of forward) {
+        if (nodeIds.has(link.target)) {
+          addEdge(id, link.target);
+        }
+      }
+    }
+
     return graph;
   }
 
