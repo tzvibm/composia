@@ -6,8 +6,8 @@
  */
 
 const API_URL = 'https://en.wikipedia.org/w/api.php';
-const BATCH_SIZE = 25; // Smaller batches to avoid rate limits
-const DELAY_MS = 500;  // Be nice to Wikipedia
+const BATCH_SIZE = 20; // Smaller batches to avoid rate limits
+const DELAY_MS = 1000; // Wikipedia etiquette: max 200 req/min
 
 function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
@@ -20,7 +20,12 @@ async function apiFetch(params, retries = 4) {
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const res = await fetch(url.toString());
+    const res = await fetch(url.toString(), {
+      headers: {
+        'User-Agent': 'Composia/2.0 (https://github.com/tzvibm/composia; knowledge-graph-demo)',
+        'Accept': 'application/json',
+      },
+    });
     if (res.ok) return res.json();
     if (res.status === 429 && attempt < retries) {
       // Exponential backoff: 2s, 4s, 8s, 16s
@@ -127,8 +132,9 @@ async function getSeedTitles(count = 200) {
     'New York City', 'London', 'Tokyo', 'Paris', 'Berlin',
   ];
 
-  // Also fetch links from top articles to discover more
+  // Also fetch links from top articles to discover more (skip for small imports)
   if (count > seeds.length) {
+    await sleep(1000);
     const firstBatch = seeds.slice(0, BATCH_SIZE);
     const results = await fetchBatch(firstBatch);
     const discovered = new Set(seeds.map(s => s));
