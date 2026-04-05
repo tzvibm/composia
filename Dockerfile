@@ -10,6 +10,8 @@ COPY src/ src/
 ENV PORT=3000
 ENV COMPOSIA_DB=/data/composia
 
+RUN mkdir -p /data/composia
+
 EXPOSE 3000
 
-CMD ["node", "src/cli.js", "serve", "--port", "3000", "--db", "/data/composia"]
+CMD ["node", "src/cli.js", "serve", "--db", "/data/composia"]

@@ -20,7 +20,7 @@ function readBody(req) {
   });
 }
 
-export async function startServer({ dbPath, port = 3000 }) {
+export async function startServer({ dbPath, port = 3000, host = '0.0.0.0' }) {
   const engine = await createEngine(dbPath);
   const kb = new Knowledge(engine);
 
@@ -116,8 +116,8 @@ export async function startServer({ dbPath, port = 3000 }) {
     }
   });
 
-  server.listen(port, () => {
-    console.log(`Composia running at http://localhost:${port}`);
+  server.listen(port, host, () => {
+    console.log(`Composia running at http://${host}:${port}`);
   });
 
   return { server, engine, kb };
