@@ -433,6 +433,8 @@ function createGraphView(canvasId, infoId) {
   // Attach interaction handlers
   const canvas = document.getElementById(canvasId);
   let dragging = false, lastX, lastY, pinchDist = 0;
+  let touchMoved = false; // track if finger moved (pan/pinch vs tap)
+  let wasPinching = false; // track if gesture involved 2+ fingers
 
   canvas.addEventListener('mousedown', e => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
   canvas.addEventListener('mousemove', e => {
@@ -465,9 +467,15 @@ function createGraphView(canvasId, infoId) {
   });
 
   canvas.addEventListener('touchstart', e => {
-    if (e.touches.length === 1) { dragging = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; }
+    touchMoved = false;
+    if (e.touches.length === 1) {
+      dragging = true;
+      lastX = e.touches[0].clientX;
+      lastY = e.touches[0].clientY;
+    }
     if (e.touches.length === 2) {
       dragging = false;
+      wasPinching = true;
       const dx = e.touches[1].clientX - e.touches[0].clientX;
       const dy = e.touches[1].clientY - e.touches[0].clientY;
       pinchDist = Math.sqrt(dx * dx + dy * dy);
@@ -476,11 +484,13 @@ function createGraphView(canvasId, infoId) {
 
   canvas.addEventListener('touchmove', e => {
     e.preventDefault();
+    touchMoved = true;
     if (e.touches.length === 1 && dragging) {
       const x = e.touches[0].clientX, y = e.touches[0].clientY;
       state.tx += x - lastX; state.ty += y - lastY; lastX = x; lastY = y; draw();
     }
     if (e.touches.length === 2) {
+      wasPinching = true;
       const dx = e.touches[1].clientX - e.touches[0].clientX;
       const dy = e.touches[1].clientY - e.touches[0].clientY;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -501,7 +511,8 @@ function createGraphView(canvasId, infoId) {
   canvas.addEventListener('touchend', e => {
     dragging = false;
     if (e.touches.length < 2) pinchDist = 0;
-    if (e.changedTouches.length === 1 && state.data) {
+    // Only treat as tap if: single finger, didn't move, wasn't pinching
+    if (e.changedTouches.length === 1 && !touchMoved && !wasPinching && state.data) {
       const rect = canvas.getBoundingClientRect();
       const mx = (e.changedTouches[0].clientX - rect.left - state.tx) / state.scale;
       const my = (e.changedTouches[0].clientY - rect.top - state.ty) / state.scale;
@@ -510,6 +521,8 @@ function createGraphView(canvasId, infoId) {
         if (dx * dx + dy * dy < 200) { openNote(n.id); return; }
       }
     }
+    // Reset pinch flag only when all fingers are lifted
+    if (e.touches.length === 0) wasPinching = false;
   });
 
   window.addEventListener('resize', () => draw());
