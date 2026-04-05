@@ -67,6 +67,27 @@
   .empty-state { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 14px; flex-direction: column; gap: 12px; padding: 20px; text-align: center; }
   .wiki-btn { background: var(--surface); color: var(--accent); border: 1px solid var(--accent); border-radius: 8px; padding: 8px 16px; cursor: pointer; font-size: 13px; font-weight: 600; min-height: 38px; }
   .wiki-btn:disabled { opacity: 0.5; cursor: wait; }
+  .edit-toggle-btn { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; cursor: pointer; font-size: 12px; font-weight: 600; min-height: 38px; }
+  .edit-toggle-btn.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+  /* Rendered markdown view */
+  .note-view { flex: 1; padding: 20px; overflow-y: auto; -webkit-overflow-scrolling: touch; line-height: 1.7; font-size: 15px; }
+  .note-view h1 { font-size: 24px; margin: 0 0 16px 0; color: var(--text); border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  .note-view h2 { font-size: 19px; margin: 24px 0 10px 0; color: var(--text); }
+  .note-view h3 { font-size: 16px; margin: 20px 0 8px 0; color: var(--text); }
+  .note-view p { margin: 0 0 12px 0; color: var(--text); }
+  .note-view ul, .note-view ol { margin: 0 0 12px 0; padding-left: 24px; }
+  .note-view li { margin: 4px 0; }
+  .note-view a.wikilink { color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent); cursor: pointer; padding: 1px 2px; border-radius: 2px; }
+  .note-view a.wikilink:hover, .note-view a.wikilink:active { background: rgba(137,180,250,0.15); }
+  .note-view a.wikilink.missing { color: var(--dim); border-bottom-color: var(--dim); }
+  .note-view code { background: var(--surface); padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+  .note-view pre { background: var(--surface); padding: 12px 16px; border-radius: 8px; overflow-x: auto; margin: 0 0 12px 0; }
+  .note-view pre code { background: none; padding: 0; }
+  .note-view blockquote { border-left: 3px solid var(--accent); padding: 4px 16px; margin: 0 0 12px 0; color: var(--dim); }
+  .note-view hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+  .note-view .tag { color: var(--accent2); font-size: 13px; cursor: pointer; }
+  .note-view .tag:hover { text-decoration: underline; }
 
   /* Overlay for mobile sidebar */
   .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 5; }
@@ -120,11 +141,13 @@
   <div class="editor-panel active" id="editorPanel">
     <div id="editorContent" style="display:none; flex:1; flex-direction:column; overflow:hidden;">
       <div class="editor-toolbar">
-        <input type="text" id="noteTitle" placeholder="Note title">
-        <button onclick="saveNote()">Save</button>
+        <input type="text" id="noteTitle" placeholder="Note title" readonly>
+        <button onclick="toggleEdit()" id="editToggle" class="edit-toggle-btn">Edit</button>
+        <button onclick="saveNote()" id="saveBtn" style="display:none">Save</button>
       </div>
       <div class="editor-content">
-        <textarea id="noteBody" placeholder="Write markdown here... use [[note-id]] to link to other notes"></textarea>
+        <div id="noteView" class="note-view"></div>
+        <textarea id="noteBody" style="display:none" placeholder="Write markdown here... use [[note-id]] to link to other notes"></textarea>
         <div class="backlinks-panel">
           <h3>Backlinks</h3>
           <div id="backlinks"></div>
@@ -191,6 +214,126 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
+// ── Markdown Renderer ───────────────────────────────────
+function renderMarkdown(text) {
+  if (!text) return '<p style="color:var(--dim)">Empty note</p>';
+
+  // Escape HTML first
+  let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // Code blocks (``` ... ```)
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
+    `<pre><code>${code.trim()}</code></pre>`
+  );
+
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  // Headings
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+  // Blockquotes
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote><p>$1</p></blockquote>');
+
+  // Horizontal rules
+  html = html.replace(/^---$/gm, '<hr>');
+
+  // Bold and italic
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+  // [[wikilinks]] → clickable links
+  html = html.replace(/\[\[([^\]|#]+?)(?:#[^\]|]*)?\|([^\]]+?)\]\]/g,
+    (_, target, display) => `<a class="wikilink" onclick="openNote('${esc(target.trim())}')">${esc(display.trim())}</a>`
+  );
+  html = html.replace(/\[\[([^\]|#]+?)(?:#[^\]]*?)?\]\]/g,
+    (_, target) => `<a class="wikilink" onclick="openNote('${esc(target.trim())}')">${esc(target.trim())}</a>`
+  );
+
+  // #tags → clickable
+  html = html.replace(/(^|\s)#([a-zA-Z][a-zA-Z0-9_-]*)/g,
+    (_, space, tag) => `${space}<span class="tag" onclick="onSearch('#${tag}')">#${tag}</span>`
+  );
+
+  // Unordered lists
+  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+
+  // Wrap remaining lines in paragraphs (skip already-wrapped elements)
+  const lines = html.split('\n');
+  const result = [];
+  let inParagraph = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (inParagraph) { result.push('</p>'); inParagraph = false; }
+      continue;
+    }
+    if (trimmed.startsWith('<h') || trimmed.startsWith('<ul') || trimmed.startsWith('<ol') ||
+        trimmed.startsWith('<pre') || trimmed.startsWith('<blockquote') || trimmed.startsWith('<hr') ||
+        trimmed.startsWith('<li')) {
+      if (inParagraph) { result.push('</p>'); inParagraph = false; }
+      result.push(trimmed);
+    } else {
+      if (!inParagraph) { result.push('<p>'); inParagraph = true; }
+      result.push(trimmed);
+    }
+  }
+  if (inParagraph) result.push('</p>');
+
+  return result.join('\n');
+}
+
+// ── Edit/View Toggle ────────────────────────────────────
+let isEditing = false;
+
+function toggleEdit() {
+  isEditing = !isEditing;
+  const view = document.getElementById('noteView');
+  const textarea = document.getElementById('noteBody');
+  const titleInput = document.getElementById('noteTitle');
+  const editBtn = document.getElementById('editToggle');
+  const saveBtn = document.getElementById('saveBtn');
+
+  if (isEditing) {
+    view.style.display = 'none';
+    textarea.style.display = 'block';
+    titleInput.readOnly = false;
+    titleInput.style.borderColor = 'var(--accent)';
+    editBtn.textContent = 'View';
+    editBtn.classList.add('active');
+    saveBtn.style.display = '';
+    textarea.focus();
+  } else {
+    textarea.style.display = 'none';
+    view.style.display = '';
+    titleInput.readOnly = true;
+    titleInput.style.borderColor = '';
+    editBtn.textContent = 'Edit';
+    editBtn.classList.remove('active');
+    saveBtn.style.display = 'none';
+    // Re-render
+    view.innerHTML = renderMarkdown(textarea.value);
+  }
+}
+
+function showRenderedView() {
+  isEditing = false;
+  document.getElementById('noteView').style.display = '';
+  document.getElementById('noteBody').style.display = 'none';
+  document.getElementById('noteTitle').readOnly = true;
+  document.getElementById('noteTitle').style.borderColor = '';
+  document.getElementById('editToggle').textContent = 'Edit';
+  document.getElementById('editToggle').classList.remove('active');
+  document.getElementById('saveBtn').style.display = 'none';
+  document.getElementById('noteView').innerHTML = renderMarkdown(
+    document.getElementById('noteBody').value
+  );
+}
+
 // ── Notes ───────────────────────────────────────────────
 async function loadNotes() {
   allNotes = await api('/api/notes');
@@ -222,6 +365,7 @@ async function openNote(id) {
   document.getElementById('editorContent').style.display = 'flex';
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('mobileTitle').textContent = currentNote.title || id;
+  showRenderedView();
   renderNoteList(allNotes);
   loadBacklinks(id);
   switchTab('editor');

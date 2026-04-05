@@ -178,23 +178,35 @@ export async function importWikipedia(kb, { target = 1000, onProgress } = {}) {
       const results = await fetchBatch(batch);
 
       for (const article of results) {
-        // Build markdown content with wikilinks
-        const lines = [`# ${article.title}`, ''];
+        // Inject [[wikilinks]] inline where linked terms appear in the text
+        let body = article.extract || '';
 
-        if (article.extract) {
-          lines.push(article.extract);
-          lines.push('');
+        // Build a map of link titles → slugs, sorted longest-first to avoid partial matches
+        const linkMap = [];
+        for (const linkTitle of (article.linkTitles || [])) {
+          if (linkTitle.includes(':')) continue;
+          linkMap.push({ title: linkTitle, slug: slugify(linkTitle) });
+        }
+        linkMap.sort((a, b) => b.title.length - a.title.length);
+
+        // Replace first occurrence of each linked term with a [[wikilink]]
+        const used = new Set();
+        for (const { title: lt, slug } of linkMap) {
+          if (used.has(slug)) continue;
+          // Case-insensitive match for the link title in the text
+          const escaped = lt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const re = new RegExp(`\\b(${escaped})\\b`, 'i');
+          const match = body.match(re);
+          if (match) {
+            body = body.slice(0, match.index) +
+              `[[${slug}|${match[1]}]]` +
+              body.slice(match.index + match[1].length);
+            used.add(slug);
+            if (used.size >= 30) break; // Cap at 30 inline links
+          }
         }
 
-        // Add links as wikilinks
-        if (article.links.length > 0) {
-          lines.push('## Related');
-          const displayLinks = article.links.slice(0, 30); // Cap links per article
-          lines.push(displayLinks.map(l => `[[${l}]]`).join(' | '));
-          lines.push('');
-        }
-
-        const content = lines.join('\n');
+        const content = `# ${article.title}\n\n${body}`;
         await kb.saveNote({
           id: article.slug,
           title: article.title,
