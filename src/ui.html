@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Composia</title>
 <style>
   :root {
@@ -11,65 +11,90 @@
     --accent2: #a6e3a1; --red: #f38ba8; --yellow: #f9e2af;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'SF Mono', 'Fira Code', monospace; background: var(--bg); color: var(--text); height: 100vh; display: flex; overflow: hidden; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; height: 100dvh; display: flex; overflow: hidden; -webkit-tap-highlight-color: transparent; }
 
   /* Sidebar */
-  .sidebar { width: 260px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
-  .sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
-  .sidebar-header h1 { font-size: 14px; flex: 1; }
-  .sidebar-header button { background: var(--accent); color: var(--bg); border: none; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; font-family: inherit; }
-  .search-box { padding: 8px 16px; border-bottom: 1px solid var(--border); }
-  .search-box input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; font-family: inherit; font-size: 12px; outline: none; }
+  .sidebar { width: 280px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; z-index: 10; }
+  .sidebar-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
+  .sidebar-header h1 { font-size: 16px; flex: 1; font-weight: 700; }
+  .sidebar-header button { background: var(--accent); color: var(--bg); border: none; border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 13px; font-weight: 600; }
+  .search-box { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .search-box input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; font-size: 14px; outline: none; }
   .search-box input:focus { border-color: var(--accent); }
-  .note-list { flex: 1; overflow-y: auto; }
-  .note-item { padding: 10px 16px; cursor: pointer; border-bottom: 1px solid var(--border); font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
-  .note-item:hover { background: var(--bg); }
-  .note-item.active { background: var(--bg); border-left: 2px solid var(--accent); }
-  .note-item .tags { font-size: 10px; color: var(--dim); }
-  .note-item .delete-btn { opacity: 0; background: none; border: none; color: var(--red); cursor: pointer; font-size: 14px; }
-  .note-item:hover .delete-btn { opacity: 1; }
+  .note-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .note-item { padding: 12px 16px; cursor: pointer; border-bottom: 1px solid var(--border); font-size: 14px; display: flex; justify-content: space-between; align-items: center; min-height: 44px; }
+  .note-item:active { background: var(--bg); }
+  .note-item.active { background: var(--bg); border-left: 3px solid var(--accent); }
+  .note-item .tags { font-size: 11px; color: var(--dim); margin-top: 2px; }
+  .note-item .delete-btn { background: none; border: none; color: var(--red); cursor: pointer; font-size: 18px; padding: 4px 8px; min-width: 32px; min-height: 32px; }
 
   /* Main area */
   .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
+  /* Mobile nav */
+  .mobile-nav { display: none; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); align-items: center; gap: 12px; }
+  .mobile-nav button { background: none; border: none; color: var(--accent); font-size: 24px; cursor: pointer; padding: 4px; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+  .mobile-nav h2 { font-size: 15px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
   /* Tabs */
   .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); }
-  .tab { padding: 10px 20px; cursor: pointer; font-size: 12px; color: var(--dim); border-bottom: 2px solid transparent; font-family: inherit; background: none; border-top: none; border-left: none; border-right: none; }
+  .tab { padding: 12px 20px; cursor: pointer; font-size: 13px; color: var(--dim); border-bottom: 2px solid transparent; background: none; border-top: none; border-left: none; border-right: none; font-weight: 600; min-height: 44px; flex: 1; }
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
   /* Editor */
   .editor-panel { flex: 1; display: none; flex-direction: column; overflow: hidden; }
   .editor-panel.active { display: flex; }
-  .editor-toolbar { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
-  .editor-toolbar input { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; font-family: inherit; font-size: 14px; flex: 1; outline: none; }
-  .editor-toolbar button { background: var(--accent2); color: var(--bg); border: none; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 600; }
-  .editor-content { flex: 1; display: flex; overflow: hidden; }
-  .editor-content textarea { flex: 1; background: var(--bg); color: var(--text); border: none; padding: 16px; font-family: inherit; font-size: 13px; line-height: 1.6; resize: none; outline: none; }
-  .backlinks-panel { width: 240px; border-left: 1px solid var(--border); padding: 12px; overflow-y: auto; }
-  .backlinks-panel h3 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
-  .backlink-item { padding: 6px 8px; font-size: 12px; color: var(--accent); cursor: pointer; border-radius: 4px; }
-  .backlink-item:hover { background: var(--bg); }
+  .editor-toolbar { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
+  .editor-toolbar input { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; font-size: 15px; flex: 1; outline: none; }
+  .editor-toolbar button { background: var(--accent2); color: var(--bg); border: none; border-radius: 8px; padding: 8px 18px; cursor: pointer; font-size: 13px; font-weight: 700; min-height: 38px; }
+  .editor-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .editor-content textarea { flex: 1; background: var(--bg); color: var(--text); border: none; padding: 16px; font-size: 15px; line-height: 1.7; resize: none; outline: none; -webkit-overflow-scrolling: touch; }
+  .backlinks-panel { border-top: 1px solid var(--border); padding: 12px 16px; max-height: 160px; overflow-y: auto; }
+  .backlinks-panel h3 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; font-weight: 700; }
+  .backlink-item { padding: 8px 10px; font-size: 13px; color: var(--accent); cursor: pointer; border-radius: 6px; min-height: 36px; display: flex; align-items: center; }
+  .backlink-item:active { background: var(--bg); }
 
   /* Graph */
   .graph-panel { flex: 1; display: none; position: relative; }
-  .graph-panel.active { display: block; }
-  .graph-panel svg { width: 100%; height: 100%; }
+  .graph-panel.active { display: flex; flex-direction: column; }
+  .graph-panel canvas { flex: 1; width: 100%; }
   .graph-controls { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; }
-  .graph-controls button { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; cursor: pointer; font-family: inherit; font-size: 11px; }
-  .graph-controls button:hover { border-color: var(--accent); }
-  .node-label { font-size: 11px; fill: var(--text); pointer-events: none; }
-  .stats-bar { padding: 6px 16px; background: var(--surface); border-top: 1px solid var(--border); font-size: 11px; color: var(--dim); display: flex; gap: 16px; }
+  .graph-controls button { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; cursor: pointer; font-size: 12px; min-height: 36px; font-weight: 600; }
+  .graph-info { position: absolute; bottom: 12px; left: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 12px; color: var(--dim); pointer-events: none; }
+  .stats-bar { padding: 8px 16px; background: var(--surface); border-top: 1px solid var(--border); font-size: 12px; color: var(--dim); display: flex; gap: 16px; min-height: 32px; align-items: center; }
 
   /* Empty state */
-  .empty-state { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 13px; flex-direction: column; gap: 8px; }
+  .empty-state { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 14px; flex-direction: column; gap: 12px; padding: 20px; text-align: center; }
+
+  /* Overlay for mobile sidebar */
+  .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 5; }
+
+  /* ── Mobile ──────────────────────────────────────── */
+  @media (max-width: 768px) {
+    .sidebar { position: fixed; left: -100%; top: 0; bottom: 0; width: 85%; max-width: 320px; transition: left 0.25s ease; }
+    .sidebar.open { left: 0; }
+    .sidebar-overlay.open { display: block; }
+    .mobile-nav { display: flex; }
+    .editor-content { flex-direction: column; }
+    .backlinks-panel { width: auto; border-left: none; border-top: 1px solid var(--border); }
+    .graph-controls { top: 8px; right: 8px; }
+  }
+
+  /* Desktop: backlinks beside editor */
+  @media (min-width: 769px) {
+    .editor-content { flex-direction: row; }
+    .backlinks-panel { width: 240px; border-top: none; border-left: 1px solid var(--border); max-height: none; }
+  }
 </style>
 </head>
 <body>
 
-<div class="sidebar">
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar(false)"></div>
+
+<div class="sidebar" id="sidebar">
   <div class="sidebar-header">
     <h1>composia</h1>
-    <button onclick="newNote()">+ New</button>
+    <button onclick="newNote(); toggleSidebar(false)">+ New</button>
   </div>
   <div class="search-box">
     <input type="text" id="search" placeholder="Search notes..." oninput="onSearch(this.value)">
@@ -78,6 +103,12 @@
 </div>
 
 <div class="main">
+  <div class="mobile-nav" id="mobileNav">
+    <button onclick="toggleSidebar(true)">&#9776;</button>
+    <h2 id="mobileTitle">composia</h2>
+    <button onclick="newNote()">+</button>
+  </div>
+
   <div class="tabs">
     <button class="tab active" data-tab="editor" onclick="switchTab('editor')">Editor</button>
     <button class="tab" data-tab="graph" onclick="switchTab('graph')">Graph</button>
@@ -98,17 +129,20 @@
       </div>
     </div>
     <div class="empty-state" id="emptyState">
+      <div style="font-size:28px;">&#127760;</div>
       <div>Select a note or create a new one</div>
-      <div style="font-size:11px">Use [[wikilinks]] to connect notes</div>
+      <div style="font-size:12px">Use [[wikilinks]] to connect notes (same as Obsidian)</div>
+      <button onclick="seedDemo()" id="seedBtn" style="margin-top:12px; background:var(--accent); color:var(--bg); border:none; border-radius:8px; padding:10px 24px; cursor:pointer; font-size:14px; font-weight:600;">Load Demo (200+ notes)</button>
     </div>
   </div>
 
   <div class="graph-panel" id="graphPanel">
-    <svg id="graphSvg"></svg>
+    <canvas id="graphCanvas"></canvas>
     <div class="graph-controls">
-      <button onclick="resetGraph()">Reset Zoom</button>
+      <button onclick="resetGraph()">Reset</button>
       <button onclick="loadGraph()">Refresh</button>
     </div>
+    <div class="graph-info" id="graphInfo"></div>
   </div>
 
   <div class="stats-bar" id="statsBar"></div>
@@ -118,6 +152,12 @@
 const API = '';
 let currentNote = null;
 let allNotes = [];
+
+// ── Mobile sidebar ─────────────────────────────────────
+function toggleSidebar(open) {
+  document.getElementById('sidebar').classList.toggle('open', open);
+  document.getElementById('sidebarOverlay').classList.toggle('open', open);
+}
 
 // ── API helpers ─────────────────────────────────────────
 async function api(path, opts = {}) {
@@ -140,12 +180,12 @@ async function loadNotes() {
 function renderNoteList(notes) {
   const el = document.getElementById('noteList');
   el.innerHTML = notes.map(n => `
-    <div class="note-item ${currentNote?.id === n.id ? 'active' : ''}" onclick="openNote('${n.id}')">
+    <div class="note-item ${currentNote?.id === n.id ? 'active' : ''}" onclick="openNote('${esc(n.id)}'); toggleSidebar(false)">
       <div>
         <div>${esc(n.title)}</div>
-        ${n.tags?.length ? `<div class="tags">${n.tags.map(t => '#' + t).join(' ')}</div>` : ''}
+        ${n.tags?.length ? `<div class="tags">${n.tags.slice(0,4).map(t => '#' + t).join(' ')}</div>` : ''}
       </div>
-      <button class="delete-btn" onclick="event.stopPropagation(); deleteNote('${n.id}')">&times;</button>
+      <button class="delete-btn" onclick="event.stopPropagation(); deleteNote('${esc(n.id)}')">&times;</button>
     </div>
   `).join('');
 }
@@ -160,8 +200,10 @@ async function openNote(id) {
   document.getElementById('noteBody').value = currentNote.content;
   document.getElementById('editorContent').style.display = 'flex';
   document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('mobileTitle').textContent = currentNote.title || id;
   renderNoteList(allNotes);
   loadBacklinks(id);
+  switchTab('editor');
 }
 
 async function saveNote() {
@@ -186,6 +228,7 @@ async function deleteNote(id) {
     currentNote = null;
     document.getElementById('editorContent').style.display = 'none';
     document.getElementById('emptyState').style.display = 'flex';
+    document.getElementById('mobileTitle').textContent = 'composia';
   }
   await loadNotes();
 }
@@ -198,17 +241,18 @@ function newNote() {
   document.getElementById('editorContent').style.display = 'flex';
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('noteTitle').focus();
+  switchTab('editor');
 }
 
 async function loadBacklinks(id) {
   const { backlinks } = await api(`/api/links/${encodeURIComponent(id)}`);
   const el = document.getElementById('backlinks');
   if (!backlinks.length) {
-    el.innerHTML = '<div style="font-size:11px;color:var(--dim)">No backlinks</div>';
+    el.innerHTML = '<div style="font-size:12px;color:var(--dim)">No backlinks yet</div>';
     return;
   }
   el.innerHTML = backlinks.map(b =>
-    `<div class="backlink-item" onclick="openNote('${b.source}')">${esc(b.source)}</div>`
+    `<div class="backlink-item" onclick="openNote('${esc(b.source)}')">${esc(b.source)}</div>`
   ).join('');
 }
 
@@ -235,47 +279,52 @@ function switchTab(tab) {
   if (tab === 'graph') loadGraph();
 }
 
-// ── Graph (d3-force) ────────────────────────────────────
-let simulation, svg, g, zoom;
+// ── Canvas Graph ────────────────────────────────────────
+let graphData = null;
+let gTransX = 0, gTransY = 0, gScale = 1;
 
 async function loadGraph() {
-  const data = await api('/api/graph');
-  renderGraph(data);
+  graphData = await api('/api/graph');
+  layoutGraph(graphData);
+  drawGraph();
 }
 
-function renderGraph({ nodes, edges }) {
-  const svgEl = document.getElementById('graphSvg');
-  svgEl.innerHTML = '';
-  const width = svgEl.clientWidth;
-  const height = svgEl.clientHeight;
+function layoutGraph(data) {
+  const { nodes, edges } = data;
+  const canvas = document.getElementById('graphCanvas');
+  const w = canvas.clientWidth || 800;
+  const h = canvas.clientHeight || 600;
 
-  // Simple force-directed layout without d3 dependency
-  // Assign initial positions
+  // Place nodes in a circle initially then run force sim
+  const cx = w / 2, cy = h / 2;
+  const radius = Math.min(w, h) * 0.35;
   nodes.forEach((n, i) => {
-    n.x = width / 2 + (Math.random() - 0.5) * 300;
-    n.y = height / 2 + (Math.random() - 0.5) * 300;
+    const angle = (2 * Math.PI * i) / nodes.length;
+    n.x = cx + radius * Math.cos(angle) + (Math.random() - 0.5) * 40;
+    n.y = cy + radius * Math.sin(angle) + (Math.random() - 0.5) * 40;
     n.vx = 0; n.vy = 0;
   });
 
   const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const iterations = Math.min(300, Math.max(100, 600 - nodes.length));
 
-  // Simple force simulation
-  function tick() {
-    // Repulsion between all nodes
+  for (let iter = 0; iter < iterations; iter++) {
+    const alpha = 1 - iter / iterations;
+    // Repulsion (Barnes-Hut would be better for 1000s, but grid approximation is fine)
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         let dx = nodes[j].x - nodes[i].x;
         let dy = nodes[j].y - nodes[i].y;
         let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        let force = 800 / (dist * dist);
+        if (dist > 500) continue; // skip far nodes
+        let force = (600 * alpha) / (dist * dist);
         let fx = dx / dist * force;
         let fy = dy / dist * force;
         nodes[i].vx -= fx; nodes[i].vy -= fy;
         nodes[j].vx += fx; nodes[j].vy += fy;
       }
     }
-
-    // Attraction along edges
+    // Attraction
     edges.forEach(e => {
       const s = nodeMap[e.source];
       const t = nodeMap[e.target];
@@ -283,89 +332,183 @@ function renderGraph({ nodes, edges }) {
       let dx = t.x - s.x;
       let dy = t.y - s.y;
       let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      let force = (dist - 120) * 0.01;
+      let force = (dist - 80) * 0.005 * alpha;
       let fx = dx / dist * force;
       let fy = dy / dist * force;
       s.vx += fx; s.vy += fy;
       t.vx -= fx; t.vy -= fy;
     });
-
-    // Center gravity
+    // Center + damping
     nodes.forEach(n => {
-      n.vx += (width / 2 - n.x) * 0.001;
-      n.vy += (height / 2 - n.y) * 0.001;
-      n.vx *= 0.9; n.vy *= 0.9;
+      n.vx += (cx - n.x) * 0.0005;
+      n.vy += (cy - n.y) * 0.0005;
+      n.vx *= 0.85; n.vy *= 0.85;
       n.x += n.vx; n.y += n.vy;
     });
   }
 
-  // Run simulation
-  for (let i = 0; i < 200; i++) tick();
+  document.getElementById('graphInfo').textContent = `${nodes.length} nodes \u00B7 ${edges.length} edges`;
+}
 
-  // SVG namespace
-  const ns = 'http://www.w3.org/2000/svg';
+function drawGraph() {
+  if (!graphData) return;
+  const { nodes, edges } = graphData;
+  const canvas = document.getElementById('graphCanvas');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * dpr;
+  canvas.height = canvas.clientHeight * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
 
-  // Zoom/pan group
-  const gEl = document.createElementNS(ns, 'g');
-  svgEl.appendChild(gEl);
+  ctx.save();
+  ctx.translate(gTransX, gTransY);
+  ctx.scale(gScale, gScale);
 
-  // Draw edges
+  const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
+
+  // Edges
+  ctx.strokeStyle = '#383850';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
   edges.forEach(e => {
     const s = nodeMap[e.source];
     const t = nodeMap[e.target];
     if (!s || !t) return;
-    const line = document.createElementNS(ns, 'line');
-    line.setAttribute('x1', s.x); line.setAttribute('y1', s.y);
-    line.setAttribute('x2', t.x); line.setAttribute('y2', t.y);
-    line.setAttribute('stroke', '#383850'); line.setAttribute('stroke-width', '1.5');
-    gEl.appendChild(line);
+    ctx.moveTo(s.x, s.y);
+    ctx.lineTo(t.x, t.y);
   });
+  ctx.stroke();
 
-  // Draw nodes
+  // Nodes
+  const showLabels = gScale > 0.4;
   nodes.forEach(n => {
-    const circle = document.createElementNS(ns, 'circle');
-    circle.setAttribute('cx', n.x); circle.setAttribute('cy', n.y);
-    circle.setAttribute('r', 6);
-    circle.setAttribute('fill', currentNote?.id === n.id ? '#a6e3a1' : '#89b4fa');
-    circle.setAttribute('cursor', 'pointer');
-    circle.onclick = () => { switchTab('editor'); openNote(n.id); };
-    gEl.appendChild(circle);
+    const r = currentNote?.id === n.id ? 5 : 3;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = currentNote?.id === n.id ? '#a6e3a1' : '#89b4fa';
+    ctx.fill();
 
-    const text = document.createElementNS(ns, 'text');
-    text.setAttribute('x', n.x + 10); text.setAttribute('y', n.y + 4);
-    text.setAttribute('class', 'node-label');
-    text.textContent = n.title || n.id;
-    gEl.appendChild(text);
+    if (showLabels && gScale > 0.7) {
+      ctx.fillStyle = '#6c7086';
+      ctx.font = `${Math.max(8, 10 / gScale)}px -apple-system, sans-serif`;
+      ctx.fillText(n.title || n.id, n.x + r + 4, n.y + 3);
+    }
   });
 
-  // Simple pan/zoom via mouse wheel and drag
-  let viewX = 0, viewY = 0, scale = 1;
-  function updateTransform() {
-    gEl.setAttribute('transform', `translate(${viewX},${viewY}) scale(${scale})`);
-  }
-
-  svgEl.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    scale *= e.deltaY > 0 ? 0.9 : 1.1;
-    scale = Math.max(0.1, Math.min(5, scale));
-    updateTransform();
-  });
-
-  let dragging = false, lastX, lastY;
-  svgEl.addEventListener('mousedown', (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
-  svgEl.addEventListener('mousemove', (e) => {
-    if (!dragging) return;
-    viewX += e.clientX - lastX; viewY += e.clientY - lastY;
-    lastX = e.clientX; lastY = e.clientY;
-    updateTransform();
-  });
-  svgEl.addEventListener('mouseup', () => dragging = false);
-  svgEl.addEventListener('mouseleave', () => dragging = false);
-
-  window._resetGraph = () => { viewX = 0; viewY = 0; scale = 1; updateTransform(); };
+  ctx.restore();
 }
 
-function resetGraph() { if (window._resetGraph) window._resetGraph(); }
+// ── Canvas interaction (touch + mouse) ──────────────────
+(function() {
+  const canvas = document.getElementById('graphCanvas');
+  let dragging = false, lastX, lastY;
+  let pinchDist = 0;
+
+  // Mouse
+  canvas.addEventListener('mousedown', e => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+  canvas.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    gTransX += e.clientX - lastX; gTransY += e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    drawGraph();
+  });
+  canvas.addEventListener('mouseup', () => dragging = false);
+  canvas.addEventListener('mouseleave', () => dragging = false);
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    gTransX = mx - (mx - gTransX) * delta;
+    gTransY = my - (my - gTransY) * delta;
+    gScale *= delta;
+    gScale = Math.max(0.05, Math.min(8, gScale));
+    drawGraph();
+  }, { passive: false });
+
+  // Click to select node
+  canvas.addEventListener('click', e => {
+    if (!graphData) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left - gTransX) / gScale;
+    const my = (e.clientY - rect.top - gTransY) / gScale;
+    for (const n of graphData.nodes) {
+      const dx = n.x - mx, dy = n.y - my;
+      if (dx * dx + dy * dy < 100) {
+        openNote(n.id);
+        return;
+      }
+    }
+  });
+
+  // Touch: pan + pinch zoom
+  canvas.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+      dragging = true;
+      lastX = e.touches[0].clientX;
+      lastY = e.touches[0].clientY;
+    }
+    if (e.touches.length === 2) {
+      dragging = false;
+      const dx = e.touches[1].clientX - e.touches[0].clientX;
+      const dy = e.touches[1].clientY - e.touches[0].clientY;
+      pinchDist = Math.sqrt(dx * dx + dy * dy);
+    }
+  }, { passive: true });
+
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (e.touches.length === 1 && dragging) {
+      const x = e.touches[0].clientX, y = e.touches[0].clientY;
+      gTransX += x - lastX; gTransY += y - lastY;
+      lastX = x; lastY = y;
+      drawGraph();
+    }
+    if (e.touches.length === 2) {
+      const dx = e.touches[1].clientX - e.touches[0].clientX;
+      const dy = e.touches[1].clientY - e.touches[0].clientY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (pinchDist > 0) {
+        const delta = dist / pinchDist;
+        const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const rect = canvas.getBoundingClientRect();
+        const mx = cx - rect.left, my = cy - rect.top;
+        gTransX = mx - (mx - gTransX) * delta;
+        gTransY = my - (my - gTransY) * delta;
+        gScale *= delta;
+        gScale = Math.max(0.05, Math.min(8, gScale));
+        drawGraph();
+      }
+      pinchDist = dist;
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', e => {
+    dragging = false;
+    if (e.touches.length < 2) pinchDist = 0;
+    // Tap to select
+    if (e.changedTouches.length === 1 && graphData) {
+      const rect = canvas.getBoundingClientRect();
+      const mx = (e.changedTouches[0].clientX - rect.left - gTransX) / gScale;
+      const my = (e.changedTouches[0].clientY - rect.top - gTransY) / gScale;
+      for (const n of graphData.nodes) {
+        const ddx = n.x - mx, ddy = n.y - my;
+        if (ddx * ddx + ddy * ddy < 200) {
+          openNote(n.id);
+          return;
+        }
+      }
+    }
+  });
+
+  // Resize
+  window.addEventListener('resize', () => { if (graphData) drawGraph(); });
+})();
+
+function resetGraph() { gTransX = 0; gTransY = 0; gScale = 1; drawGraph(); }
 
 // ── Keyboard shortcuts ──────────────────────────────────
 document.addEventListener('keydown', (e) => {
@@ -383,7 +526,6 @@ document.addEventListener('keydown', (e) => {
 document.getElementById('noteBody').addEventListener('click', function(e) {
   const pos = this.selectionStart;
   const text = this.value;
-  // Check if cursor is inside a [[...]]
   const before = text.lastIndexOf('[[', pos);
   const after = text.indexOf(']]', pos);
   if (before !== -1 && after !== -1 && after > before) {
@@ -395,6 +537,20 @@ document.getElementById('noteBody').addEventListener('click', function(e) {
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 function slugify(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'untitled'; }
+
+// ── Seed demo ───────────────────────────────────────────
+async function seedDemo() {
+  const btn = document.getElementById('seedBtn');
+  btn.textContent = 'Seeding...';
+  btn.disabled = true;
+  try {
+    await api('/api/seed', { method: 'POST' });
+    await loadNotes();
+    switchTab('graph');
+  } catch(e) {
+    btn.textContent = 'Error: ' + e.message;
+  }
+}
 
 // Boot
 loadNotes();

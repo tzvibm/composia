@@ -103,6 +103,13 @@ export async function startServer({ dbPath, port = 3000, host = '0.0.0.0' }) {
         return jsonResponse(res, results);
       }
 
+      // ── API: Seed ───────────────────────────────────
+      if (url.pathname === '/api/seed' && method === 'POST') {
+        const { seedDatabase } = await import('./seed.js');
+        const result = await seedDatabase(kb);
+        return jsonResponse(res, result, 201);
+      }
+
       // ── API: Stats ───────────────────────────────────
       if (url.pathname === '/api/stats' && method === 'GET') {
         return jsonResponse(res, await kb.stats());
