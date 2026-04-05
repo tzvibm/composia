@@ -65,6 +65,8 @@
 
   /* Empty state */
   .empty-state { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 14px; flex-direction: column; gap: 12px; padding: 20px; text-align: center; }
+  .wiki-btn { background: var(--surface); color: var(--accent); border: 1px solid var(--accent); border-radius: 8px; padding: 8px 16px; cursor: pointer; font-size: 13px; font-weight: 600; min-height: 38px; }
+  .wiki-btn:disabled { opacity: 0.5; cursor: wait; }
 
   /* Overlay for mobile sidebar */
   .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 5; }
@@ -134,6 +136,15 @@
       <div>Select a note or create a new one</div>
       <div style="font-size:12px">Use [[wikilinks]] to connect notes (same as Obsidian)</div>
       <button onclick="seedDemo()" id="seedBtn" style="margin-top:12px; background:var(--accent); color:var(--bg); border:none; border-radius:8px; padding:10px 24px; cursor:pointer; font-size:14px; font-weight:600;">Load Demo (200+ notes)</button>
+      <div style="margin-top:20px; border-top:1px solid var(--border); padding-top:16px; width:100%; max-width:320px; text-align:center;">
+        <div style="font-size:13px; margin-bottom:8px; color:var(--text);">Or import real Wikipedia articles</div>
+        <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+          <button onclick="importWiki(500)" class="wiki-btn">500 articles</button>
+          <button onclick="importWiki(2000)" class="wiki-btn">2,000 articles</button>
+          <button onclick="importWiki(10000)" class="wiki-btn">10,000 articles</button>
+        </div>
+        <div id="wikiProgress" style="margin-top:8px; font-size:11px; color:var(--dim);"></div>
+      </div>
     </div>
   </div>
 
@@ -601,6 +612,27 @@ document.getElementById('noteBody').addEventListener('click', function(e) {
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 function slugify(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'untitled'; }
+
+// ── Wikipedia import ────────────────────────────────────
+async function importWiki(count) {
+  const btns = document.querySelectorAll('.wiki-btn');
+  btns.forEach(b => b.disabled = true);
+  const prog = document.getElementById('wikiProgress');
+  prog.textContent = `Importing ${count} Wikipedia articles... this may take a few minutes`;
+  try {
+    const result = await api('/api/wikipedia', {
+      method: 'POST',
+      body: { target: count },
+    });
+    prog.textContent = `Done! Imported ${result.imported} articles with ${result.links} links`;
+    await loadNotes();
+    switchTab('fullgraph');
+  } catch(e) {
+    prog.textContent = 'Error: ' + e.message;
+  } finally {
+    btns.forEach(b => b.disabled = false);
+  }
+}
 
 // ── Seed demo ───────────────────────────────────────────
 async function seedDemo() {

@@ -110,6 +110,15 @@ export async function startServer({ dbPath, port = 3000, host = '0.0.0.0' }) {
         return jsonResponse(res, result, 201);
       }
 
+      // ── API: Wikipedia Import ──────────────────────────
+      if (url.pathname === '/api/wikipedia' && method === 'POST') {
+        const body = await readBody(req);
+        const target = Math.min(parseInt(body.target || '1000', 10), 50000);
+        const { importWikipedia } = await import('./wikipedia.js');
+        const result = await importWikipedia(kb, { target });
+        return jsonResponse(res, result, 201);
+      }
+
       // ── API: Stats ───────────────────────────────────
       if (url.pathname === '/api/stats' && method === 'GET') {
         return jsonResponse(res, await kb.stats());
