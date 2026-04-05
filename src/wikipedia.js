@@ -6,22 +6,31 @@
  */
 
 const API_URL = 'https://en.wikipedia.org/w/api.php';
-const BATCH_SIZE = 50; // Max titles per API request
-const DELAY_MS = 100;  // Be nice to Wikipedia
+const BATCH_SIZE = 25; // Smaller batches to avoid rate limits
+const DELAY_MS = 500;  // Be nice to Wikipedia
 
 function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-async function apiFetch(params) {
+async function apiFetch(params, retries = 4) {
   const url = new URL(API_URL);
   params.format = 'json';
   params.origin = '*';
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error(`Wikipedia API error: ${res.status}`);
-  return res.json();
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const res = await fetch(url.toString());
+    if (res.ok) return res.json();
+    if (res.status === 429 && attempt < retries) {
+      // Exponential backoff: 2s, 4s, 8s, 16s
+      const wait = Math.pow(2, attempt + 1) * 1000;
+      console.log(`Wikipedia rate limited, retrying in ${wait/1000}s...`);
+      await sleep(wait);
+      continue;
+    }
+    throw new Error(`Wikipedia API error: ${res.status}`);
+  }
 }
 
 /**
