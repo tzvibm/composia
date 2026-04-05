@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node src/cli.js serve",
     "dev": "node src/cli.js serve",
+    "bench": "node src/benchmark.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
