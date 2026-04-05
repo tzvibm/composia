@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Composia</title>
+<style>
+  :root {
+    --bg: #1e1e2e; --surface: #262637; --border: #383850;
+    --text: #cdd6f4; --dim: #6c7086; --accent: #89b4fa;
+    --accent2: #a6e3a1; --red: #f38ba8; --yellow: #f9e2af;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'SF Mono', 'Fira Code', monospace; background: var(--bg); color: var(--text); height: 100vh; display: flex; overflow: hidden; }
+
+  /* Sidebar */
+  .sidebar { width: 260px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+  .sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
+  .sidebar-header h1 { font-size: 14px; flex: 1; }
+  .sidebar-header button { background: var(--accent); color: var(--bg); border: none; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; font-family: inherit; }
+  .search-box { padding: 8px 16px; border-bottom: 1px solid var(--border); }
+  .search-box input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; font-family: inherit; font-size: 12px; outline: none; }
+  .search-box input:focus { border-color: var(--accent); }
+  .note-list { flex: 1; overflow-y: auto; }
+  .note-item { padding: 10px 16px; cursor: pointer; border-bottom: 1px solid var(--border); font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+  .note-item:hover { background: var(--bg); }
+  .note-item.active { background: var(--bg); border-left: 2px solid var(--accent); }
+  .note-item .tags { font-size: 10px; color: var(--dim); }
+  .note-item .delete-btn { opacity: 0; background: none; border: none; color: var(--red); cursor: pointer; font-size: 14px; }
+  .note-item:hover .delete-btn { opacity: 1; }
+
+  /* Main area */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* Tabs */
+  .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); }
+  .tab { padding: 10px 20px; cursor: pointer; font-size: 12px; color: var(--dim); border-bottom: 2px solid transparent; font-family: inherit; background: none; border-top: none; border-left: none; border-right: none; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* Editor */
+  .editor-panel { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+  .editor-panel.active { display: flex; }
+  .editor-toolbar { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
+  .editor-toolbar input { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; font-family: inherit; font-size: 14px; flex: 1; outline: none; }
+  .editor-toolbar button { background: var(--accent2); color: var(--bg); border: none; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 600; }
+  .editor-content { flex: 1; display: flex; overflow: hidden; }
+  .editor-content textarea { flex: 1; background: var(--bg); color: var(--text); border: none; padding: 16px; font-family: inherit; font-size: 13px; line-height: 1.6; resize: none; outline: none; }
+  .backlinks-panel { width: 240px; border-left: 1px solid var(--border); padding: 12px; overflow-y: auto; }
+  .backlinks-panel h3 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .backlink-item { padding: 6px 8px; font-size: 12px; color: var(--accent); cursor: pointer; border-radius: 4px; }
+  .backlink-item:hover { background: var(--bg); }
+
+  /* Graph */
+  .graph-panel { flex: 1; display: none; position: relative; }
+  .graph-panel.active { display: block; }
+  .graph-panel svg { width: 100%; height: 100%; }
+  .graph-controls { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; }
+  .graph-controls button { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; cursor: pointer; font-family: inherit; font-size: 11px; }
+  .graph-controls button:hover { border-color: var(--accent); }
+  .node-label { font-size: 11px; fill: var(--text); pointer-events: none; }
+  .stats-bar { padding: 6px 16px; background: var(--surface); border-top: 1px solid var(--border); font-size: 11px; color: var(--dim); display: flex; gap: 16px; }
+
+  /* Empty state */
+  .empty-state { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 13px; flex-direction: column; gap: 8px; }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-header">
+    <h1>composia</h1>
+    <button onclick="newNote()">+ New</button>
+  </div>
+  <div class="search-box">
+    <input type="text" id="search" placeholder="Search notes..." oninput="onSearch(this.value)">
+  </div>
+  <div class="note-list" id="noteList"></div>
+</div>
+
+<div class="main">
+  <div class="tabs">
+    <button class="tab active" data-tab="editor" onclick="switchTab('editor')">Editor</button>
+    <button class="tab" data-tab="graph" onclick="switchTab('graph')">Graph</button>
+  </div>
+
+  <div class="editor-panel active" id="editorPanel">
+    <div id="editorContent" style="display:none; flex:1; flex-direction:column; overflow:hidden;">
+      <div class="editor-toolbar">
+        <input type="text" id="noteTitle" placeholder="Note title">
+        <button onclick="saveNote()">Save</button>
+      </div>
+      <div class="editor-content">
+        <textarea id="noteBody" placeholder="Write markdown here... use [[note-id]] to link to other notes"></textarea>
+        <div class="backlinks-panel">
+          <h3>Backlinks</h3>
+          <div id="backlinks"></div>
+        </div>
+      </div>
+    </div>
+    <div class="empty-state" id="emptyState">
+      <div>Select a note or create a new one</div>
+      <div style="font-size:11px">Use [[wikilinks]] to connect notes</div>
+    </div>
+  </div>
+
+  <div class="graph-panel" id="graphPanel">
+    <svg id="graphSvg"></svg>
+    <div class="graph-controls">
+      <button onclick="resetGraph()">Reset Zoom</button>
+      <button onclick="loadGraph()">Refresh</button>
+    </div>
+  </div>
+
+  <div class="stats-bar" id="statsBar"></div>
+</div>
+
+<script>
+const API = '';
+let currentNote = null;
+let allNotes = [];
+
+// ── API helpers ─────────────────────────────────────────
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// ── Notes ───────────────────────────────────────────────
+async function loadNotes() {
+  allNotes = await api('/api/notes');
+  renderNoteList(allNotes);
+  loadStats();
+}
+
+function renderNoteList(notes) {
+  const el = document.getElementById('noteList');
+  el.innerHTML = notes.map(n => `
+    <div class="note-item ${currentNote?.id === n.id ? 'active' : ''}" onclick="openNote('${n.id}')">
+      <div>
+        <div>${esc(n.title)}</div>
+        ${n.tags?.length ? `<div class="tags">${n.tags.map(t => '#' + t).join(' ')}</div>` : ''}
+      </div>
+      <button class="delete-btn" onclick="event.stopPropagation(); deleteNote('${n.id}')">&times;</button>
+    </div>
+  `).join('');
+}
+
+async function openNote(id) {
+  try {
+    currentNote = await api(`/api/notes/${encodeURIComponent(id)}`);
+  } catch {
+    currentNote = { id, title: id, content: '', tags: [] };
+  }
+  document.getElementById('noteTitle').value = currentNote.title;
+  document.getElementById('noteBody').value = currentNote.content;
+  document.getElementById('editorContent').style.display = 'flex';
+  document.getElementById('emptyState').style.display = 'none';
+  renderNoteList(allNotes);
+  loadBacklinks(id);
+}
+
+async function saveNote() {
+  const id = currentNote?.id || slugify(document.getElementById('noteTitle').value);
+  const note = await api('/api/notes', {
+    method: 'POST',
+    body: {
+      id,
+      title: document.getElementById('noteTitle').value,
+      content: document.getElementById('noteBody').value,
+    },
+  });
+  currentNote = note;
+  await loadNotes();
+  renderNoteList(allNotes);
+  loadBacklinks(id);
+}
+
+async function deleteNote(id) {
+  await api(`/api/notes/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (currentNote?.id === id) {
+    currentNote = null;
+    document.getElementById('editorContent').style.display = 'none';
+    document.getElementById('emptyState').style.display = 'flex';
+  }
+  await loadNotes();
+}
+
+function newNote() {
+  const id = 'note-' + Date.now().toString(36);
+  currentNote = { id, title: '', content: '' };
+  document.getElementById('noteTitle').value = '';
+  document.getElementById('noteBody').value = '';
+  document.getElementById('editorContent').style.display = 'flex';
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('noteTitle').focus();
+}
+
+async function loadBacklinks(id) {
+  const { backlinks } = await api(`/api/links/${encodeURIComponent(id)}`);
+  const el = document.getElementById('backlinks');
+  if (!backlinks.length) {
+    el.innerHTML = '<div style="font-size:11px;color:var(--dim)">No backlinks</div>';
+    return;
+  }
+  el.innerHTML = backlinks.map(b =>
+    `<div class="backlink-item" onclick="openNote('${b.source}')">${esc(b.source)}</div>`
+  ).join('');
+}
+
+function onSearch(q) {
+  if (!q) return renderNoteList(allNotes);
+  const lower = q.toLowerCase();
+  renderNoteList(allNotes.filter(n =>
+    n.title?.toLowerCase().includes(lower) ||
+    n.content?.toLowerCase().includes(lower) ||
+    n.tags?.some(t => t.includes(lower))
+  ));
+}
+
+async function loadStats() {
+  const stats = await api('/api/stats');
+  document.getElementById('statsBar').textContent = `${stats.notes} notes \u00B7 ${stats.links} links`;
+}
+
+// ── Tabs ────────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.getElementById('editorPanel').classList.toggle('active', tab === 'editor');
+  document.getElementById('graphPanel').classList.toggle('active', tab === 'graph');
+  if (tab === 'graph') loadGraph();
+}
+
+// ── Graph (d3-force) ────────────────────────────────────
+let simulation, svg, g, zoom;
+
+async function loadGraph() {
+  const data = await api('/api/graph');
+  renderGraph(data);
+}
+
+function renderGraph({ nodes, edges }) {
+  const svgEl = document.getElementById('graphSvg');
+  svgEl.innerHTML = '';
+  const width = svgEl.clientWidth;
+  const height = svgEl.clientHeight;
+
+  // Simple force-directed layout without d3 dependency
+  // Assign initial positions
+  nodes.forEach((n, i) => {
+    n.x = width / 2 + (Math.random() - 0.5) * 300;
+    n.y = height / 2 + (Math.random() - 0.5) * 300;
+    n.vx = 0; n.vy = 0;
+  });
+
+  const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
+
+  // Simple force simulation
+  function tick() {
+    // Repulsion between all nodes
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        let dx = nodes[j].x - nodes[i].x;
+        let dy = nodes[j].y - nodes[i].y;
+        let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        let force = 800 / (dist * dist);
+        let fx = dx / dist * force;
+        let fy = dy / dist * force;
+        nodes[i].vx -= fx; nodes[i].vy -= fy;
+        nodes[j].vx += fx; nodes[j].vy += fy;
+      }
+    }
+
+    // Attraction along edges
+    edges.forEach(e => {
+      const s = nodeMap[e.source];
+      const t = nodeMap[e.target];
+      if (!s || !t) return;
+      let dx = t.x - s.x;
+      let dy = t.y - s.y;
+      let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      let force = (dist - 120) * 0.01;
+      let fx = dx / dist * force;
+      let fy = dy / dist * force;
+      s.vx += fx; s.vy += fy;
+      t.vx -= fx; t.vy -= fy;
+    });
+
+    // Center gravity
+    nodes.forEach(n => {
+      n.vx += (width / 2 - n.x) * 0.001;
+      n.vy += (height / 2 - n.y) * 0.001;
+      n.vx *= 0.9; n.vy *= 0.9;
+      n.x += n.vx; n.y += n.vy;
+    });
+  }
+
+  // Run simulation
+  for (let i = 0; i < 200; i++) tick();
+
+  // SVG namespace
+  const ns = 'http://www.w3.org/2000/svg';
+
+  // Zoom/pan group
+  const gEl = document.createElementNS(ns, 'g');
+  svgEl.appendChild(gEl);
+
+  // Draw edges
+  edges.forEach(e => {
+    const s = nodeMap[e.source];
+    const t = nodeMap[e.target];
+    if (!s || !t) return;
+    const line = document.createElementNS(ns, 'line');
+    line.setAttribute('x1', s.x); line.setAttribute('y1', s.y);
+    line.setAttribute('x2', t.x); line.setAttribute('y2', t.y);
+    line.setAttribute('stroke', '#383850'); line.setAttribute('stroke-width', '1.5');
+    gEl.appendChild(line);
+  });
+
+  // Draw nodes
+  nodes.forEach(n => {
+    const circle = document.createElementNS(ns, 'circle');
+    circle.setAttribute('cx', n.x); circle.setAttribute('cy', n.y);
+    circle.setAttribute('r', 6);
+    circle.setAttribute('fill', currentNote?.id === n.id ? '#a6e3a1' : '#89b4fa');
+    circle.setAttribute('cursor', 'pointer');
+    circle.onclick = () => { switchTab('editor'); openNote(n.id); };
+    gEl.appendChild(circle);
+
+    const text = document.createElementNS(ns, 'text');
+    text.setAttribute('x', n.x + 10); text.setAttribute('y', n.y + 4);
+    text.setAttribute('class', 'node-label');
+    text.textContent = n.title || n.id;
+    gEl.appendChild(text);
+  });
+
+  // Simple pan/zoom via mouse wheel and drag
+  let viewX = 0, viewY = 0, scale = 1;
+  function updateTransform() {
+    gEl.setAttribute('transform', `translate(${viewX},${viewY}) scale(${scale})`);
+  }
+
+  svgEl.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    scale *= e.deltaY > 0 ? 0.9 : 1.1;
+    scale = Math.max(0.1, Math.min(5, scale));
+    updateTransform();
+  });
+
+  let dragging = false, lastX, lastY;
+  svgEl.addEventListener('mousedown', (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+  svgEl.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    viewX += e.clientX - lastX; viewY += e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    updateTransform();
+  });
+  svgEl.addEventListener('mouseup', () => dragging = false);
+  svgEl.addEventListener('mouseleave', () => dragging = false);
+
+  window._resetGraph = () => { viewX = 0; viewY = 0; scale = 1; updateTransform(); };
+}
+
+function resetGraph() { if (window._resetGraph) window._resetGraph(); }
+
+// ── Keyboard shortcuts ──────────────────────────────────
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+    e.preventDefault();
+    if (currentNote) saveNote();
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+    e.preventDefault();
+    newNote();
+  }
+});
+
+// Handle [[wikilink]] clicks in textarea
+document.getElementById('noteBody').addEventListener('click', function(e) {
+  const pos = this.selectionStart;
+  const text = this.value;
+  // Check if cursor is inside a [[...]]
+  const before = text.lastIndexOf('[[', pos);
+  const after = text.indexOf(']]', pos);
+  if (before !== -1 && after !== -1 && after > before) {
+    const inner = text.slice(before + 2, after);
+    const target = inner.split('|')[0].split('#')[0].trim();
+    if (target) openNote(target);
+  }
+});
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function slugify(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'untitled'; }
+
+// Boot
+loadNotes();
+</script>
+</body>
+</html>

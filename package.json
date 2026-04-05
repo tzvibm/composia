@@ -1,33 +1,23 @@
 {
-  "name": "composia-native",
-  "version": "1.0.0",
+  "name": "composia",
+  "version": "2.0.0",
   "type": "module",
-  "main": "index.js",
-  "napi": {
-    "binaryName": "composia_native",
-    "packageName": "composia-native"
+  "description": "Graph-backed knowledge base for agents. Like Obsidian, but with a real graph database.",
+  "main": "src/index.js",
+  "bin": {
+    "composia": "./src/cli.js"
   },
   "scripts": {
-    "artifacts": "napi build --platform --release",
-    "build": "napi build --release",
-    "build:debug": "napi build",
-    "prestart": "npm run build",
-    "start": "NODE_ENV=production node src/app.js",
-    "dev": "NODE_ENV=development node src/app.js",
-    "test": "NODE_ENV=test vitest run --no-file-parallelism",
-    "test:watch": "NODE_ENV=test vitest --no-file-parallelism"
+    "start": "node src/cli.js serve",
+    "dev": "node src/cli.js serve",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
-    "@fastify/cors": "^10.0.0",
-    "@fastify/swagger": "^9.6.1",
-    "@fastify/swagger-ui": "^5.2.4",
-    "dotenv": "^16.4.5",
-    "fastify": "^5.0.0",
-    "lodash": "^4.17.23",
-    "zod": "^3.23.8"
+    "classic-level": "^2.0.0",
+    "commander": "^13.0.0"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.0.0",
     "vitest": "^2.1.0"
   }
 }
