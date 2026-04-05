@@ -1,0 +1,10 @@
+node_modules
+.composia
+.composia-test-*
+data
+docs
+tests
+.git
+.env*
+README.md
+CLAUDE.md

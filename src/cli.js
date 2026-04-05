@@ -6,7 +6,7 @@ import { Knowledge } from './knowledge.js';
 import { readFileSync } from 'fs';
 import path from 'path';
 
-const DEFAULT_DB = path.join(process.cwd(), '.composia');
+const DEFAULT_DB = process.env.COMPOSIA_DB || path.join(process.cwd(), '.composia');
 
 async function withKnowledge(opts, fn) {
   const engine = await createEngine(opts.db || DEFAULT_DB);
@@ -167,7 +167,7 @@ program
 program
   .command('serve')
   .description('Start the web UI with graph visualization')
-  .option('-p, --port <port>', 'port number', '3000')
+  .option('-p, --port <port>', 'port number', process.env.PORT || '3000')
   .action(async (opts, cmd) => {
     const globalOpts = cmd.parent.opts();
     const { startServer } = await import('./server.js');
