@@ -380,6 +380,11 @@ function createGraphView(canvasId, infoId) {
     }
   }
 
+  // Transform world coords to screen coords (zoom spreads positions, not sizes)
+  function toScreen(wx, wy) {
+    return [wx * state.scale + state.tx, wy * state.scale + state.ty];
+  }
+
   function draw() {
     if (!state.data) return;
     const { nodes, edges } = state.data;
@@ -390,42 +395,50 @@ function createGraphView(canvasId, infoId) {
     const ctx = canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-
-    ctx.save();
-    ctx.translate(state.tx, state.ty);
-    ctx.scale(state.scale, state.scale);
+    const cw = canvas.clientWidth, ch = canvas.clientHeight;
 
     const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
 
-    // Edges
+    // Edges — constant 1px lines
     ctx.strokeStyle = '#383850';
-    ctx.lineWidth = 0.8;
+    ctx.lineWidth = 1;
     ctx.beginPath();
     edges.forEach(e => {
       const s = nodeMap[e.source]; const t = nodeMap[e.target];
       if (!s || !t) return;
-      ctx.moveTo(s.x, s.y); ctx.lineTo(t.x, t.y);
+      const [sx, sy] = toScreen(s.x, s.y);
+      const [tx, ty] = toScreen(t.x, t.y);
+      // Skip edges fully off-screen
+      if ((sx < -50 && tx < -50) || (sx > cw+50 && tx > cw+50) ||
+          (sy < -50 && ty < -50) || (sy > ch+50 && ty > ch+50)) return;
+      ctx.moveTo(sx, sy); ctx.lineTo(tx, ty);
     });
     ctx.stroke();
 
-    // Nodes
+    // Nodes — constant size circles, labels appear when zoomed in enough
+    const nodeRadius = 4;
+    const showLabels = state.scale > 0.6;
+    ctx.font = '11px -apple-system, sans-serif';
+
     nodes.forEach(n => {
+      const [sx, sy] = toScreen(n.x, n.y);
+      // Skip nodes off-screen
+      if (sx < -100 || sx > cw+100 || sy < -100 || sy > ch+100) return;
+
       const isCenter = n.id === state.centerNodeId;
       const isActive = currentNote?.id === n.id;
-      const r = isCenter ? 6 : isActive ? 5 : 3;
+      const r = isCenter ? 6 : isActive ? 5 : nodeRadius;
+
       ctx.beginPath();
-      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
       ctx.fillStyle = isCenter ? '#f9e2af' : isActive ? '#a6e3a1' : '#89b4fa';
       ctx.fill();
 
-      if (state.scale > 0.5) {
+      if (showLabels) {
         ctx.fillStyle = isCenter ? '#f9e2af' : '#6c7086';
-        ctx.font = `${Math.max(8, 10 / state.scale)}px -apple-system, sans-serif`;
-        ctx.fillText(n.title || n.id, n.x + r + 4, n.y + 3);
+        ctx.fillText(n.title || n.id, sx + r + 4, sy + 3);
       }
     });
-
-    ctx.restore();
   }
 
   function reset() { state.tx = 0; state.ty = 0; state.scale = 1; draw(); }
