@@ -240,6 +240,77 @@ program
     });
   });
 
+// ── Rules (natural English directives for Claude) ───────
+
+const rules = program.command('rules').description('Manage rules that Claude follows in this project');
+
+rules
+  .command('add <rule...>')
+  .description('Add a rule in plain English')
+  .action(async (ruleParts, opts, cmd) => {
+    const globalOpts = cmd.parent.parent.opts();
+    const rule = ruleParts.join(' ');
+    await withKnowledge(globalOpts, async (kb) => {
+      let note;
+      try {
+        note = await kb.getNote('composia-rules');
+      } catch {
+        note = null;
+      }
+      const existingContent = note?.content || '# Composia Rules\n\n';
+      const newContent = existingContent.trimEnd() + `\n- ${rule}\n`;
+      await kb.saveNote({
+        id: 'composia-rules',
+        title: 'Composia Rules',
+        content: newContent,
+        tags: ['rules', 'system'],
+      });
+      console.log(`Rule added: "${rule}"`);
+    });
+  });
+
+rules
+  .command('list')
+  .description('Show all rules')
+  .action(async (opts, cmd) => {
+    const globalOpts = cmd.parent.parent.opts();
+    await withKnowledge(globalOpts, async (kb) => {
+      try {
+        const note = await kb.getNote('composia-rules');
+        console.log(note.content);
+      } catch {
+        console.log('No rules configured yet. Add one with: composia rules add "your rule"');
+      }
+    });
+  });
+
+rules
+  .command('rm <index>')
+  .description('Remove a rule by its number (1-based)')
+  .action(async (index, opts, cmd) => {
+    const globalOpts = cmd.parent.parent.opts();
+    const idx = parseInt(index, 10);
+    await withKnowledge(globalOpts, async (kb) => {
+      const note = await kb.getNote('composia-rules');
+      const lines = note.content.split('\n');
+      let ruleCount = 0;
+      const newLines = lines.filter(line => {
+        if (line.trim().match(/^[-*•]\s+.+$/) || line.trim().match(/^\d+\.\s+.+$/)) {
+          ruleCount++;
+          return ruleCount !== idx;
+        }
+        return true;
+      });
+      await kb.saveNote({
+        id: 'composia-rules',
+        title: 'Composia Rules',
+        content: newLines.join('\n'),
+        tags: ['rules', 'system'],
+      });
+      console.log(`Rule #${idx} removed.`);
+    });
+  });
+
 // ── Property Index Queries ───────────────────────────────
 
 program

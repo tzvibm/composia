@@ -3,20 +3,15 @@
 /**
  * Composia Session Hooks for Claude Code
  *
- * Two hooks:
- *   PreToolCall  — Before Claude makes changes, search the graph for relevant context
- *   PostSession  — After a session, capture what happened as a knowledge graph entry
+ * Three modes:
+ *   pre   — Before Claude makes changes, surface relevant context + rules
+ *   post  — After a session, capture what happened
+ *   rules — Output all rules for Claude to follow (used in CLAUDE.md or SessionStart)
  *
  * Configure in .claude/settings.json:
  *   "hooks": {
  *     "PreToolCall": [{ "command": "node node_modules/composia/src/hooks.js pre" }],
- *     "PostSession": [{ "command": "node node_modules/composia/src/hooks.js post" }]
- *   }
- *
- * Or for a project using composia locally:
- *   "hooks": {
- *     "PreToolCall": [{ "command": "node src/hooks.js pre" }],
- *     "Stop": [{ "command": "node src/hooks.js post" }]
+ *     "Stop": [{ "command": "node node_modules/composia/src/hooks.js post" }]
  *   }
  */
 
@@ -25,9 +20,8 @@ import { Knowledge } from './knowledge.js';
 import path from 'path';
 
 const DB_PATH = process.env.COMPOSIA_DB || path.join(process.cwd(), '.composia', 'db');
-const mode = process.argv[2]; // 'pre' or 'post'
+const mode = process.argv[2]; // 'pre', 'post', or 'rules'
 
-// Read hook input from stdin
 function readStdin() {
   return new Promise((resolve) => {
     let data = '';
@@ -37,17 +31,17 @@ function readStdin() {
       try { resolve(JSON.parse(data)); }
       catch { resolve({}); }
     });
-    // Timeout after 2s in case no stdin
     setTimeout(() => resolve({}), 2000);
   });
 }
+
+// ── Pre-tool hook: surface context + rules ──────────────
 
 async function preToolCall() {
   const input = await readStdin();
   const toolName = input.tool_name || '';
   const toolInput = input.tool_input || {};
 
-  // Only trigger on file-modifying tools
   if (!['Edit', 'Write', 'Bash'].includes(toolName)) return;
 
   let engine, kb;
@@ -55,65 +49,137 @@ async function preToolCall() {
     engine = await createEngine(DB_PATH);
     kb = new Knowledge(engine);
 
-    // Extract keywords from the tool input to search the graph
+    const output = [];
+
+    // 1. Search for relevant knowledge
     const searchTerms = [];
     if (toolInput.file_path) {
-      const filename = path.basename(toolInput.file_path, path.extname(toolInput.file_path));
-      searchTerms.push(filename);
+      searchTerms.push(path.basename(toolInput.file_path, path.extname(toolInput.file_path)));
     }
     if (toolInput.command) {
-      // Extract meaningful words from bash commands
-      const words = toolInput.command.split(/\s+/).filter(w => w.length > 3 && !w.startsWith('-'));
-      searchTerms.push(...words.slice(0, 3));
+      searchTerms.push(...toolInput.command.split(/\s+/).filter(w => w.length > 3 && !w.startsWith('-')).slice(0, 3));
     }
 
-    if (searchTerms.length === 0) return;
+    if (searchTerms.length > 0) {
+      const results = [];
+      for (const term of searchTerms) {
+        results.push(...await kb.search(term));
+      }
+      const seen = new Set();
+      const unique = results.filter(n => {
+        if (seen.has(n.id) || n.id.startsWith('composia-rules')) return false;
+        seen.add(n.id);
+        return true;
+      }).slice(0, 5);
 
-    // Search the graph for relevant context
-    const results = [];
-    for (const term of searchTerms) {
-      const found = await kb.search(term);
-      results.push(...found);
+      if (unique.length > 0) {
+        output.push('Relevant knowledge:');
+        for (const n of unique) {
+          output.push(`  - ${n.title}: ${n.content?.slice(0, 120)}...`);
+        }
+      }
     }
 
-    // Deduplicate
-    const seen = new Set();
-    const unique = results.filter(n => {
-      if (seen.has(n.id)) return false;
-      seen.add(n.id);
-      return true;
-    }).slice(0, 5);
+    // 2. Check if any rules apply to this file/context
+    const rules = await getRulesForContext(kb, toolInput);
+    if (rules.length > 0) {
+      output.push('Active rules:');
+      for (const rule of rules) {
+        output.push(`  - ${rule}`);
+      }
+    }
 
-    if (unique.length > 0) {
-      // Output context as a message for Claude to see
-      const context = unique.map(n =>
-        `- **${n.title}** (${n.tags?.join(', ') || 'no tags'}): ${n.content?.slice(0, 150)}...`
-      ).join('\n');
-
-      process.stderr.write(
-        `\n[Composia] Relevant knowledge found:\n${context}\n`
-      );
+    if (output.length > 0) {
+      process.stderr.write(`\n[Composia]\n${output.join('\n')}\n`);
     }
 
     await engine.close();
   } catch (err) {
-    // Hooks should never block — fail silently
     if (engine) await engine.close().catch(() => {});
   }
 }
 
+async function getRulesForContext(kb, toolInput) {
+  const allRules = await loadRules(kb);
+  if (allRules.length === 0) return [];
+
+  // Filter rules relevant to this context
+  const filePath = toolInput.file_path || toolInput.command || '';
+  const relevant = [];
+
+  for (const rule of allRules) {
+    // Check if rule has a "when" condition that matches
+    const lower = rule.toLowerCase();
+    if (lower.includes('always') || lower.includes('every')) {
+      relevant.push(rule);
+    } else if (filePath && matchesRuleContext(lower, filePath.toLowerCase())) {
+      relevant.push(rule);
+    }
+  }
+
+  return relevant;
+}
+
+function matchesRuleContext(ruleLower, contextLower) {
+  // Extract keywords from the rule's "when" clause
+  const keywords = ['auth', 'security', 'api', 'database', 'db', 'test', 'config',
+    'deploy', 'migration', 'schema', 'route', 'model', 'controller', 'service'];
+  for (const kw of keywords) {
+    if (ruleLower.includes(kw) && contextLower.includes(kw)) return true;
+  }
+  return false;
+}
+
+// ── Load rules from the graph ───────────────────────────
+
+async function loadRules(kb) {
+  const rules = [];
+
+  // Load from notes tagged with #rule or #rules
+  for (const tag of ['rule', 'rules']) {
+    const notes = await kb.findByTag(tag);
+    for (const note of notes) {
+      const parsed = parseRulesFromContent(note.content);
+      rules.push(...parsed);
+    }
+  }
+
+  // Load the special composia-rules note if it exists
+  try {
+    const rulesNote = await kb.getNote('composia-rules');
+    rules.push(...parseRulesFromContent(rulesNote.content));
+  } catch {}
+
+  return [...new Set(rules)]; // deduplicate
+}
+
+function parseRulesFromContent(content) {
+  if (!content) return [];
+  const rules = [];
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    // Extract rules from bullet points and numbered lists
+    const match = trimmed.match(/^[-*•]\s+(.+)$/) || trimmed.match(/^\d+\.\s+(.+)$/);
+    if (match) {
+      const rule = match[1].trim();
+      // Skip headings, empty rules, and metadata
+      if (rule.length > 10 && !rule.startsWith('#') && !rule.startsWith('**')) {
+        rules.push(rule);
+      }
+    }
+  }
+  return rules;
+}
+
+// ── Post-session hook: capture what happened ────────────
+
 async function postSession() {
   const input = await readStdin();
 
-  // Build a session summary note
   const sessionId = `session-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}`;
   const timestamp = new Date().toISOString();
-
-  // Extract info from the stop hook input
   const transcript = input.transcript || input.messages || [];
-  const stopReason = input.stop_reason || 'unknown';
 
-  // Collect file paths that were modified
   const filesModified = new Set();
   const toolsUsed = new Set();
 
@@ -129,7 +195,6 @@ async function postSession() {
     }
   }
 
-  // Get the last user message as the task description
   let taskDescription = 'Session activity';
   for (let i = transcript.length - 1; i >= 0; i--) {
     if (transcript[i].role === 'user') {
@@ -139,10 +204,7 @@ async function postSession() {
     }
   }
 
-  const fileLinks = [...filesModified].map(f => {
-    const name = path.basename(f, path.extname(f));
-    return `[[file-${name}]]`;
-  }).join(', ');
+  const fileLinks = [...filesModified].map(f => `[[file-${path.basename(f, path.extname(f))}]]`).join(', ');
 
   const content = [
     `# Session: ${taskDescription.slice(0, 80)}`,
@@ -161,13 +223,44 @@ async function postSession() {
   try {
     engine = await createEngine(DB_PATH);
     const kb = new Knowledge(engine);
+
+    // Save session note
     await kb.saveNote({
       id: sessionId,
       title: `Session: ${taskDescription.slice(0, 60)}`,
       content,
       tags: ['session', 'auto-captured'],
     });
+
+    // Also save a context snapshot automatically
+    await kb.saveContextSnapshot(`session-${sessionId}`);
+
     process.stderr.write(`[Composia] Session captured: ${sessionId}\n`);
+    await engine.close();
+  } catch (err) {
+    if (engine) await engine.close().catch(() => {});
+  }
+}
+
+// ── Rules output (for CLAUDE.md or SessionStart hook) ───
+
+async function outputRules() {
+  let engine;
+  try {
+    engine = await createEngine(DB_PATH);
+    const kb = new Knowledge(engine);
+    const rules = await loadRules(kb);
+
+    if (rules.length === 0) {
+      console.log('No rules configured. Add rules with: composia rules add "your rule here"');
+    } else {
+      console.log('# Composia Rules\n');
+      console.log('Follow these rules when working in this project:\n');
+      for (const rule of rules) {
+        console.log(`- ${rule}`);
+      }
+    }
+
     await engine.close();
   } catch (err) {
     if (engine) await engine.close().catch(() => {});
@@ -180,7 +273,9 @@ if (mode === 'pre') {
   await preToolCall();
 } else if (mode === 'post') {
   await postSession();
+} else if (mode === 'rules') {
+  await outputRules();
 } else {
-  console.error('Usage: node hooks.js <pre|post>');
+  console.error('Usage: node hooks.js <pre|post|rules>');
   process.exit(1);
 }
