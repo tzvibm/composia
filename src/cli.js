@@ -40,8 +40,11 @@ program
     }
     console.log('\nAdd to .claude/settings.json:');
     console.log(JSON.stringify(config, null, 2));
-    console.log('\nPut markdown files in .composia/kb/ then run:');
-    console.log('  composia ingest');
+    console.log('\nWorkflow:');
+    console.log('  1. Put .md files in .composia/kb/  (committed to git)');
+    console.log('  2. Run: composia build             (builds RocksDB locally, like npm install)');
+    console.log('  3. Teammates: git pull && composia build');
+    console.log('  4. After MCP/hook writes: composia sync  (writes new notes back to kb/)');
   });
 
 program
@@ -186,17 +189,24 @@ program
 
 program
   .command('remember <text...>')
-  .description('Quickly save a piece of knowledge (auto-generates ID, parses [[links]] and #tags)')
+  .description('Quickly save a piece of knowledge (writes to kb/ + RocksDB)')
   .action(async (textParts, opts, cmd) => {
     const globalOpts = cmd.parent.opts();
+    const { mkdirSync, writeFileSync } = await import('fs');
     const text = textParts.join(' ');
-    // Extract title from first sentence or first 60 chars
     const title = text.split(/[.\n]/)[0].slice(0, 80);
     const id = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `note-${Date.now().toString(36)}`;
+
+    // Write to RocksDB
     await withKnowledge(globalOpts, async (kb) => {
-      const note = await kb.saveNote({ id, title, content: text });
-      console.log(`Saved: ${note.id} (${note.tags.length} tags, links auto-indexed)`);
+      await kb.saveNote({ id, title, content: text });
     });
+
+    // Also write to kb/ so it's in git
+    const kbDir = path.join(process.cwd(), '.composia', 'kb');
+    mkdirSync(kbDir, { recursive: true });
+    writeFileSync(path.join(kbDir, `${id}.md`), text);
+    console.log(`Saved: ${id} (to db + .composia/kb/${id}.md)`);
   });
 
 program
@@ -246,27 +256,35 @@ const rules = program.command('rules').description('Manage rules that Claude fol
 
 rules
   .command('add <rule...>')
-  .description('Add a rule in plain English')
+  .description('Add a rule in plain English (writes to kb/ + RocksDB)')
   .action(async (ruleParts, opts, cmd) => {
     const globalOpts = cmd.parent.parent.opts();
+    const { mkdirSync, writeFileSync, readFileSync, existsSync } = await import('fs');
     const rule = ruleParts.join(' ');
+
+    // Update kb/ file (source of truth for git)
+    const kbDir = path.join(process.cwd(), '.composia', 'kb');
+    mkdirSync(kbDir, { recursive: true });
+    const rulesFile = path.join(kbDir, 'rules.md');
+    let content;
+    if (existsSync(rulesFile)) {
+      content = readFileSync(rulesFile, 'utf-8');
+    } else {
+      content = '# Composia Rules\n\n';
+    }
+    content = content.trimEnd() + `\n- ${rule}\n`;
+    writeFileSync(rulesFile, content);
+
+    // Update RocksDB
     await withKnowledge(globalOpts, async (kb) => {
-      let note;
-      try {
-        note = await kb.getNote('composia-rules');
-      } catch {
-        note = null;
-      }
-      const existingContent = note?.content || '# Composia Rules\n\n';
-      const newContent = existingContent.trimEnd() + `\n- ${rule}\n`;
       await kb.saveNote({
         id: 'composia-rules',
         title: 'Composia Rules',
-        content: newContent,
+        content,
         tags: ['rules', 'system'],
       });
-      console.log(`Rule added: "${rule}"`);
     });
+    console.log(`Rule added: "${rule}" (saved to .composia/kb/rules.md)`);
   });
 
 rules
@@ -445,81 +463,42 @@ trigger
     });
   });
 
-// ── Export / Import ──────────────────────────────────────
+// ── Build / Sync (git-native team sharing) ──────────────
 
 program
-  .command('export')
-  .description('Export knowledge graph to JSON (pipe to file)')
+  .command('build')
+  .description('Build RocksDB graph from .composia/kb/ markdown files (like npm install)')
   .action(async (opts, cmd) => {
     const globalOpts = cmd.parent.opts();
-    const engine = await createEngine(globalOpts.db || DEFAULT_DB);
-    const kb = new (await import('./knowledge.js')).Knowledge(engine);
-    const notes = await kb.listNotes({ limit: 1000000 });
-    const dump = [];
-    for (const note of notes) {
-      const { forward } = await kb.getLinks(note.id);
-      dump.push({ ...note, _links: forward.map(l => l.target) });
-    }
-    console.log(JSON.stringify(dump, null, 2));
-    await engine.close();
+    const kbDir = path.join(process.cwd(), '.composia', 'kb');
+    const dbPath = globalOpts.db || DEFAULT_DB;
+    const { build } = await import('./sync.js');
+    const result = await build(kbDir, dbPath);
+    console.log(`Built: ${result.notes} notes, ${result.links} links`);
   });
 
 program
-  .command('import <file>')
-  .description('Import knowledge graph from JSON export')
-  .action(async (file, opts, cmd) => {
+  .command('sync')
+  .description('Write RocksDB notes back to .composia/kb/ as markdown files')
+  .action(async (opts, cmd) => {
     const globalOpts = cmd.parent.opts();
-    const { readFileSync } = await import('fs');
-    const data = JSON.parse(readFileSync(file, 'utf-8'));
-    const engine = await createEngine(globalOpts.db || DEFAULT_DB);
-    const kb = new (await import('./knowledge.js')).Knowledge(engine);
-    let count = 0;
-    for (const note of data) {
-      await kb.saveNote({ id: note.id, title: note.title, content: note.content, tags: note.tags || [] });
-      count++;
-    }
-    console.log(`Imported ${count} notes`);
-    await engine.close();
+    const kbDir = path.join(process.cwd(), '.composia', 'kb');
+    const dbPath = globalOpts.db || DEFAULT_DB;
+    const { syncToFiles } = await import('./sync.js');
+    const result = await syncToFiles(kbDir, dbPath);
+    console.log(`Synced: ${result.written} written, ${result.skipped} unchanged, ${result.total} total`);
   });
-
-// ── Ingest markdown folder ──────────────────────────────
 
 program
   .command('ingest [dir]')
-  .description('Ingest a folder of .md files into the graph (default: .composia/kb/)')
+  .description('Alias for build — ingest markdown files into the graph')
   .action(async (dir, opts, cmd) => {
     const globalOpts = cmd.parent.opts();
-    const { readdirSync, readFileSync, statSync } = await import('fs');
-    const targetDir = dir || path.join(process.cwd(), '.composia', 'kb');
-    const engine = await createEngine(globalOpts.db || DEFAULT_DB);
-    const kb = new (await import('./knowledge.js')).Knowledge(engine);
-    const { slugify } = await import('./parser.js');
-
-    function walk(d) {
-      const files = [];
-      for (const entry of readdirSync(d)) {
-        const full = path.join(d, entry);
-        if (statSync(full).isDirectory()) {
-          files.push(...walk(full));
-        } else if (entry.endsWith('.md')) {
-          files.push(full);
-        }
-      }
-      return files;
-    }
-
-    const files = walk(targetDir);
-    let count = 0;
-    for (const file of files) {
-      const content = readFileSync(file, 'utf-8');
-      const rel = path.relative(targetDir, file).replace(/\.md$/, '');
-      const id = slugify(rel.replace(/[\\/]/g, '-'));
-      const title = rel.split(/[\\/]/).pop();
-      await kb.saveNote({ id, title, content });
-      count++;
-    }
-    console.log(`Ingested ${count} markdown files from ${targetDir}`);
-    await engine.close();
+    const kbDir = dir || path.join(process.cwd(), '.composia', 'kb');
+    const dbPath = globalOpts.db || DEFAULT_DB;
+    const { build } = await import('./sync.js');
+    const result = await build(kbDir, dbPath);
+    console.log(`Ingested: ${result.notes} notes, ${result.links} links`);
   });
 
 program.parse();
