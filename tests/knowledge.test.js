@@ -151,4 +151,84 @@ describe('Knowledge', () => {
     expect(note.content).toContain('# My Decision');
     expect(note.content).toMatch(/Created on \d{4}-\d{2}-\d{2}/);
   });
+
+  // ── Property Index ──────────────────────────────────
+
+  it('queries notes by indexed property', async () => {
+    await kb.saveNote({ id: 'a', title: 'A', content: 'test', properties: { status: 'draft' } });
+    await kb.saveNote({ id: 'b', title: 'B', content: 'test', properties: { status: 'done' } });
+    await kb.saveNote({ id: 'c', title: 'C', content: 'test', properties: { status: 'draft' } });
+
+    const drafts = await kb.queryByProperty('status', 'draft');
+    expect(drafts).toHaveLength(2);
+    expect(drafts.map(n => n.id).sort()).toEqual(['a', 'c']);
+  });
+
+  it('gets unique field values', async () => {
+    await kb.saveNote({ id: 'x', title: 'X', content: '', properties: { priority: 'high' } });
+    await kb.saveNote({ id: 'y', title: 'Y', content: '', properties: { priority: 'low' } });
+    await kb.saveNote({ id: 'z', title: 'Z', content: '', properties: { priority: 'high' } });
+
+    const values = await kb.getFieldValues('priority');
+    expect(Object.keys(values).sort()).toEqual(['high', 'low']);
+    expect(values.high).toHaveLength(2);
+  });
+
+  // ── Temporal History ────────────────────────────────
+
+  it('saves and retrieves version history', async () => {
+    await kb.saveNote({ id: 'evolve', title: 'V1', content: 'first' });
+    await kb.saveNote({ id: 'evolve', title: 'V2', content: 'second' });
+    await kb.saveNote({ id: 'evolve', title: 'V3', content: 'third' });
+
+    const history = await kb.getHistory('evolve');
+    expect(history).toHaveLength(3);
+    expect(history[0].title).toBe('V3'); // most recent first
+    expect(history[2].title).toBe('V1');
+  });
+
+  it('gets recent changes across graph', async () => {
+    await kb.saveNote({ id: 'r1', title: 'R1', content: '' });
+    await kb.saveNote({ id: 'r2', title: 'R2', content: '' });
+
+    const changes = await kb.getRecentChanges({ limit: 10 });
+    expect(changes.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('saves and lists context snapshots', async () => {
+    await kb.saveNote({ id: 's1', title: 'S1', content: '' });
+    await kb.saveNote({ id: 's2', title: 'S2', content: '' });
+
+    const snap = await kb.saveContextSnapshot('before-refactor');
+    expect(snap.noteCount).toBeGreaterThanOrEqual(2);
+
+    const list = await kb.listSnapshots();
+    expect(list.length).toBeGreaterThanOrEqual(1);
+    expect(list[0].label).toBe('before-refactor');
+  });
+
+  // ── Triggers ────────────────────────────────────────
+
+  it('fires trigger and auto-tags on property match', async () => {
+    await kb.addTrigger('flag-blocked', {
+      field: 'status', op: 'eq', value: 'blocked',
+      action: 'tag', actionArgs: { tag: 'needs-attention' },
+    });
+
+    await kb.saveNote({ id: 'task1', title: 'Task', content: '', properties: { status: 'blocked' } });
+    const note = await kb.getNote('task1');
+    expect(note.tags).toContain('needs-attention');
+  });
+
+  it('lists and removes triggers', async () => {
+    await kb.addTrigger('test-trigger', {
+      field: 'x', op: 'set', action: 'log', actionArgs: { message: 'test' },
+    });
+    const triggers = await kb.listTriggers();
+    expect(triggers.length).toBeGreaterThanOrEqual(1);
+
+    await kb.removeTrigger('test-trigger');
+    const after = await kb.listTriggers();
+    expect(after.find(t => t.id === 'test-trigger')).toBeUndefined();
+  });
 });

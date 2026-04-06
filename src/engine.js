@@ -29,6 +29,9 @@ export class Engine {
     this.backlinks = this.db.sublevel('backlinks', { valueEncoding: 'json' });
     this.tags = this.db.sublevel('tags', { valueEncoding: 'json' });
     this.meta = this.db.sublevel('meta', { valueEncoding: 'json' });
+    this.propIndex = this.db.sublevel('propidx', { valueEncoding: 'json' }); // field:value:noteId → {}
+    this.history = this.db.sublevel('history', { valueEncoding: 'json' });   // noteId:timestamp → snapshot
+    this.triggers = this.db.sublevel('triggers', { valueEncoding: 'json' }); // triggerId → { field, value, action, ... }
     return this;
   }
 
@@ -146,6 +149,149 @@ export class Engine {
       results.push(key.slice(tag.length + 1));
     }
     return results;
+  }
+
+  // ── Property Indexes ───────────────────────────────────
+  // Key format: field:value:noteId → {}
+  // Enables instant queries like "all notes where status=blocked"
+
+  async syncPropertyIndex(noteId, newProps, oldProps = {}) {
+    const ops = [];
+    // Remove old index entries
+    for (const [key, val] of Object.entries(oldProps)) {
+      const v = String(val);
+      ops.push({ type: 'del', sublevel: this.propIndex, key: `${key}:${v}:${noteId}` });
+    }
+    // Add new index entries
+    for (const [key, val] of Object.entries(newProps)) {
+      if (val === undefined || val === null) continue;
+      const v = String(val);
+      ops.push({ type: 'put', sublevel: this.propIndex, key: `${key}:${v}:${noteId}`, value: {} });
+    }
+    if (ops.length) await this.db.batch(ops);
+  }
+
+  async queryByProperty(field, value) {
+    const prefix = `${field}:${String(value)}:`;
+    const results = [];
+    for await (const [key] of this.propIndex.iterator({ gte: prefix, lte: prefix + '\xff' })) {
+      results.push(key.slice(prefix.length));
+    }
+    return results;
+  }
+
+  async queryByField(field) {
+    const prefix = `${field}:`;
+    const results = [];
+    for await (const [key] of this.propIndex.iterator({ gte: prefix, lte: prefix + '\xff' })) {
+      const rest = key.slice(prefix.length);
+      const lastColon = rest.lastIndexOf(':');
+      const value = rest.slice(0, lastColon);
+      const noteId = rest.slice(lastColon + 1);
+      results.push({ noteId, value });
+    }
+    return results;
+  }
+
+  // ── Temporal History ──────────────────────────────────
+  // Key format: noteId:timestamp → full note snapshot
+
+  _snapshotSeq = 0;
+  async saveSnapshot(noteId, note) {
+    const ts = new Date().toISOString();
+    const seq = String(this._snapshotSeq++).padStart(6, '0');
+    await this.history.put(`${noteId}:${ts}:${seq}`, { ...note, _snapshot_at: ts });
+  }
+
+  async getHistory(noteId, { limit = 50 } = {}) {
+    const results = [];
+    for await (const [key, value] of this.history.iterator({
+      gte: `${noteId}:`,
+      lte: `${noteId}:\xff`,
+      reverse: true,
+      limit,
+    })) {
+      results.push(value);
+    }
+    return results;
+  }
+
+  async getSnapshotAt(noteId, timestamp) {
+    // Find the most recent snapshot at or before the given timestamp
+    let result = null;
+    for await (const [key, value] of this.history.iterator({
+      gte: `${noteId}:`,
+      lte: `${noteId}:${timestamp}\xff`,
+      reverse: true,
+      limit: 1,
+    })) {
+      result = value;
+    }
+    return result;
+  }
+
+  async diffNote(noteId, fromTimestamp, toTimestamp) {
+    const from = await this.getSnapshotAt(noteId, fromTimestamp);
+    const to = toTimestamp ? await this.getSnapshotAt(noteId, toTimestamp) : await this.getNote(noteId).catch(() => null);
+    if (!from && !to) return null;
+    return {
+      noteId,
+      from: from?._snapshot_at || null,
+      to: to?._snapshot_at || to?.updated || null,
+      changes: {
+        title: from?.title !== to?.title ? { old: from?.title, new: to?.title } : undefined,
+        content: from?.content !== to?.content ? { old: from?.content, new: to?.content } : undefined,
+        tags: JSON.stringify(from?.tags) !== JSON.stringify(to?.tags) ? { old: from?.tags, new: to?.tags } : undefined,
+        properties: JSON.stringify(from?.properties) !== JSON.stringify(to?.properties) ? { old: from?.properties, new: to?.properties } : undefined,
+      },
+    };
+  }
+
+  // ── Triggers ──────────────────────────────────────────
+  // Stored rules that fire when property conditions are met
+
+  async addTrigger(id, trigger) {
+    // trigger: { field, op, value, action, actionArgs }
+    // op: 'eq', 'neq', 'set', 'changed'
+    // action: 'tag', 'link', 'log', 'hook'
+    await this.triggers.put(id, { id, ...trigger, created: new Date().toISOString() });
+  }
+
+  async removeTrigger(id) {
+    await this.triggers.del(id);
+  }
+
+  async listTriggers() {
+    const results = [];
+    for await (const [, value] of this.triggers.iterator()) {
+      results.push(value);
+    }
+    return results;
+  }
+
+  async evaluateTriggers(noteId, note, oldNote) {
+    const triggers = await this.listTriggers();
+    const fired = [];
+
+    for (const trigger of triggers) {
+      const { field, op, value: triggerValue } = trigger;
+      const newVal = note.properties?.[field];
+      const oldVal = oldNote?.properties?.[field];
+
+      let match = false;
+      switch (op) {
+        case 'eq': match = String(newVal) === String(triggerValue); break;
+        case 'neq': match = String(newVal) !== String(triggerValue); break;
+        case 'set': match = newVal !== undefined && newVal !== null && oldVal === undefined; break;
+        case 'changed': match = String(newVal) !== String(oldVal); break;
+      }
+
+      if (match) {
+        fired.push({ trigger, noteId, oldVal, newVal });
+      }
+    }
+
+    return fired;
   }
 
   // ── Graph Traversal ────────────────────────────────────

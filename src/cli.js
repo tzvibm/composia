@@ -240,6 +240,140 @@ program
     });
   });
 
+// ── Property Index Queries ───────────────────────────────
+
+program
+  .command('query <field> <value>')
+  .description('Find all notes where a property field equals a value')
+  .action(async (field, value, opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    await withKnowledge(globalOpts, async (kb) => {
+      const notes = await kb.queryByProperty(field, value);
+      if (notes.length === 0) { console.log(`No notes with ${field} = ${value}`); return; }
+      json(notes.map(n => ({ id: n.id, title: n.title, [field]: n.properties?.[field] })));
+    });
+  });
+
+program
+  .command('field <field>')
+  .description('Show all unique values for a property field across the graph')
+  .action(async (field, opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    await withKnowledge(globalOpts, async (kb) => {
+      const values = await kb.getFieldValues(field);
+      for (const [value, noteIds] of Object.entries(values)) {
+        console.log(`  ${field}=${value}  (${noteIds.length} notes: ${noteIds.slice(0, 5).join(', ')}${noteIds.length > 5 ? '...' : ''})`);
+      }
+    });
+  });
+
+// ── Temporal / History ──────────────────────────────────
+
+program
+  .command('history <id>')
+  .description('Show version history of a note')
+  .option('-n, --limit <n>', 'max versions', '10')
+  .action(async (id, opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    await withKnowledge(globalOpts, async (kb) => {
+      const versions = await kb.getHistory(id, { limit: parseInt(opts.limit, 10) });
+      if (versions.length === 0) { console.log('No history found.'); return; }
+      for (const v of versions) {
+        console.log(`  ${v._snapshot_at}  "${v.title}"  [${v.tags?.join(', ') || ''}]`);
+      }
+    });
+  });
+
+program
+  .command('changes')
+  .description('Show recent changes across the entire graph')
+  .option('-n, --limit <n>', 'max changes', '20')
+  .option('--since <timestamp>', 'only changes after this ISO timestamp')
+  .action(async (opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    await withKnowledge(globalOpts, async (kb) => {
+      const changes = await kb.getRecentChanges({ since: opts.since, limit: parseInt(opts.limit, 10) });
+      for (const c of changes) {
+        console.log(`  ${c._snapshot_at}  ${c.id}  "${c.title}"`);
+      }
+      console.log(`\n${changes.length} changes`);
+    });
+  });
+
+program
+  .command('snapshot <label>')
+  .description('Save a full context snapshot (use before clearing context)')
+  .action(async (label, opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    await withKnowledge(globalOpts, async (kb) => {
+      const result = await kb.saveContextSnapshot(label);
+      console.log(`Snapshot "${label}" saved: ${result.noteCount} notes at ${result.timestamp}`);
+    });
+  });
+
+program
+  .command('snapshots')
+  .description('List all saved context snapshots')
+  .action(async (opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    await withKnowledge(globalOpts, async (kb) => {
+      const list = await kb.listSnapshots();
+      if (list.length === 0) { console.log('No snapshots.'); return; }
+      json(list);
+    });
+  });
+
+// ── Triggers ────────────────────────────────────────────
+
+const trigger = program.command('trigger').description('Manage reactive triggers');
+
+trigger
+  .command('add <id>')
+  .description('Add a trigger: when <field> <op> <value> → <action>')
+  .requiredOption('--field <field>', 'property field to watch')
+  .requiredOption('--op <op>', 'operator: eq, neq, set, changed')
+  .option('--value <value>', 'value to compare (for eq/neq)')
+  .requiredOption('--action <action>', 'action: tag, link, log')
+  .option('--tag <tag>', 'tag to add (for action=tag)')
+  .option('--target <target>', 'note to link to (for action=link)')
+  .option('--message <message>', 'log message (for action=log)')
+  .action(async (id, opts, cmd) => {
+    const globalOpts = cmd.parent.parent.opts();
+    await withKnowledge(globalOpts, async (kb) => {
+      await kb.addTrigger(id, {
+        field: opts.field,
+        op: opts.op,
+        value: opts.value,
+        action: opts.action,
+        actionArgs: { tag: opts.tag, target: opts.target, message: opts.message },
+      });
+      console.log(`Trigger "${id}" added: when ${opts.field} ${opts.op} ${opts.value || ''} → ${opts.action}`);
+    });
+  });
+
+trigger
+  .command('rm <id>')
+  .description('Remove a trigger')
+  .action(async (id, opts, cmd) => {
+    const globalOpts = cmd.parent.parent.opts();
+    await withKnowledge(globalOpts, async (kb) => {
+      await kb.removeTrigger(id);
+      console.log(`Trigger "${id}" removed.`);
+    });
+  });
+
+trigger
+  .command('list')
+  .description('List all triggers')
+  .action(async (opts, cmd) => {
+    const globalOpts = cmd.parent.parent.opts();
+    await withKnowledge(globalOpts, async (kb) => {
+      const triggers = await kb.listTriggers();
+      if (triggers.length === 0) { console.log('No triggers.'); return; }
+      json(triggers);
+    });
+  });
+
 // ── Export / Import ──────────────────────────────────────
 
 program

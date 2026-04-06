@@ -16,22 +16,21 @@ export class Knowledge {
   async saveNote({ id, title, content, tags: explicitTags, properties: explicitProps }) {
     const noteId = id || slugify(title || 'untitled');
 
+    // Get existing note for diff/triggers
+    const existing = await this.engine.getNote(noteId).catch(() => null);
+
     // Parse frontmatter from content
     const { properties: parsedProps, body } = parseFrontmatter(content || '');
     const properties = { ...parsedProps, ...explicitProps };
 
-    // Extract title from frontmatter if not provided
     const noteTitle = title || properties.title || noteId;
 
-    // Parse links and tags from body (not frontmatter)
     const parsedLinks = parseLinks(body);
     const parsedTags = parseTags(body);
-
-    // Merge tags: explicit + parsed from content + frontmatter tags
     const fmTags = Array.isArray(properties.tags) ? properties.tags : [];
     const allTags = [...new Set([...(explicitTags || []), ...parsedTags, ...fmTags])];
 
-    // Save the note with properties
+    // Save the note
     const note = await this.engine.putNote(noteId, {
       title: noteTitle,
       content,
@@ -39,10 +38,16 @@ export class Knowledge {
       properties,
     });
 
+    // Save temporal snapshot
+    await this.engine.saveSnapshot(noteId, note);
+
+    // Sync property index
+    await this.engine.syncPropertyIndex(noteId, properties, existing?.properties || {});
+
     // Sync tags
     await this.engine.syncTags(noteId, allTags);
 
-    // Sync links: get current forward links, diff, update
+    // Sync links
     const currentLinks = await this.engine.getForwardLinks(noteId);
     const currentTargets = new Set(currentLinks.map(l => l.target));
     const newTargets = new Set(parsedLinks.map(l => l.target));
@@ -58,7 +63,40 @@ export class Knowledge {
       }
     }
 
+    // Evaluate triggers
+    const fired = await this.engine.evaluateTriggers(noteId, note, existing);
+    for (const { trigger } of fired) {
+      await this._executeTriggerAction(trigger, noteId, note);
+    }
+
     return note;
+  }
+
+  async _executeTriggerAction(trigger, noteId, note) {
+    switch (trigger.action) {
+      case 'tag': {
+        // Auto-add a tag
+        const tagToAdd = trigger.actionArgs?.tag;
+        if (tagToAdd && !note.tags.includes(tagToAdd)) {
+          const newTags = [...note.tags, tagToAdd];
+          await this.engine.putNote(noteId, { ...note, tags: newTags });
+          await this.engine.syncTags(noteId, newTags);
+        }
+        break;
+      }
+      case 'link': {
+        // Auto-create a link to a target note
+        const target = trigger.actionArgs?.target;
+        if (target) await this.engine.putLink(noteId, target);
+        break;
+      }
+      case 'log': {
+        // Write to stderr (visible in hooks output)
+        const msg = trigger.actionArgs?.message || `Trigger ${trigger.id} fired on ${noteId}`;
+        process.stderr?.write?.(`[Composia trigger] ${msg}\n`);
+        break;
+      }
+    }
   }
 
   async getNote(id) {
@@ -202,7 +240,145 @@ export class Knowledge {
     return this.saveNote({ id, title, content });
   }
 
+  // ── Property Index Queries ─────────────────────────────
+
+  /**
+   * Query notes by indexed property value.
+   * "Give me all notes where status = blocked"
+   */
+  async queryByProperty(field, value) {
+    const noteIds = await this.engine.queryByProperty(field, value);
+    const notes = [];
+    for (const id of noteIds) {
+      const note = await this.engine.getNote(id).catch(() => null);
+      if (note) notes.push(note);
+    }
+    return notes;
+  }
+
+  /**
+   * Get all unique values for a field across the graph.
+   * "What statuses exist?" → ["draft", "review", "done"]
+   */
+  async getFieldValues(field) {
+    const entries = await this.engine.queryByField(field);
+    const values = new Map();
+    for (const { noteId, value } of entries) {
+      if (!values.has(value)) values.set(value, []);
+      values.get(value).push(noteId);
+    }
+    return Object.fromEntries(values);
+  }
+
+  // ── Temporal / History ────────────────────────────────
+
+  /**
+   * Get version history of a note.
+   */
+  async getHistory(noteId, opts) {
+    return this.engine.getHistory(noteId, opts);
+  }
+
+  /**
+   * Get a note as it was at a specific time.
+   */
+  async getSnapshotAt(noteId, timestamp) {
+    return this.engine.getSnapshotAt(noteId, timestamp);
+  }
+
+  /**
+   * Diff a note between two points in time.
+   */
+  async diffNote(noteId, fromTimestamp, toTimestamp) {
+    return this.engine.diffNote(noteId, fromTimestamp, toTimestamp);
+  }
+
+  /**
+   * Get all changes across the entire graph in a time range.
+   * "What happened in the last 3 sessions?"
+   */
+  async getRecentChanges({ since, limit = 50 } = {}) {
+    const results = [];
+    for await (const [key, value] of this.engine.history.iterator({ reverse: true, limit: limit * 2 })) {
+      if (since && value._snapshot_at < since) break;
+      results.push(value);
+      if (results.length >= limit) break;
+    }
+    return results;
+  }
+
+  /**
+   * Save an explicit context snapshot — captures the current state of
+   * multiple notes, for use before context compaction or session end.
+   */
+  async saveContextSnapshot(label, noteIds) {
+    const snapshot = {
+      label,
+      timestamp: new Date().toISOString(),
+      notes: [],
+    };
+    const ids = noteIds || (await this.engine.listNotes({ limit: 100000 })).map(n => n.id);
+    for (const id of ids) {
+      const note = await this.engine.getNote(id).catch(() => null);
+      if (note) {
+        const { forward } = await this.getLinks(id);
+        snapshot.notes.push({ ...note, _links: forward.map(l => l.target) });
+      }
+    }
+    // Store as a special note
+    const snapshotId = `snapshot-${label}-${Date.now().toString(36)}`;
+    await this.engine.meta.put(snapshotId, snapshot);
+    return { id: snapshotId, noteCount: snapshot.notes.length, timestamp: snapshot.timestamp };
+  }
+
+  /**
+   * Restore a context snapshot.
+   */
+  async restoreSnapshot(snapshotId) {
+    const snapshot = await this.engine.meta.get(snapshotId);
+    let count = 0;
+    for (const note of snapshot.notes) {
+      await this.saveNote({ id: note.id, title: note.title, content: note.content, tags: note.tags, properties: note.properties });
+      count++;
+    }
+    return { restored: count, from: snapshot.label, timestamp: snapshot.timestamp };
+  }
+
+  /**
+   * List all context snapshots.
+   */
+  async listSnapshots() {
+    const results = [];
+    for await (const [key, value] of this.engine.meta.iterator({ gte: 'snapshot-', lte: 'snapshot-\xff' })) {
+      results.push({ id: key, label: value.label, timestamp: value.timestamp, noteCount: value.notes?.length });
+    }
+    return results;
+  }
+
+  // ── Triggers ──────────────────────────────────────────
+
+  /**
+   * Add a trigger rule.
+   * @param {string} id - Trigger ID
+   * @param {object} trigger - { field, op, value, action, actionArgs }
+   *   op: 'eq' | 'neq' | 'set' | 'changed'
+   *   action: 'tag' | 'link' | 'log'
+   */
+  async addTrigger(id, trigger) {
+    return this.engine.addTrigger(id, trigger);
+  }
+
+  async removeTrigger(id) {
+    return this.engine.removeTrigger(id);
+  }
+
+  async listTriggers() {
+    return this.engine.listTriggers();
+  }
+
   async stats() {
-    return this.engine.stats();
+    const base = await this.engine.stats();
+    const triggers = await this.engine.listTriggers();
+    return { ...base, triggers: triggers.length };
   }
 }
