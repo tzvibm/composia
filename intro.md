@@ -1,26 +1,24 @@
 # Why Composia Exists
 
-## The Shift to Agentic Engineering
+## The Problem: Agents Need Memory
 
-In early 2026, Andrej Karpathy declared "vibe coding" passé and introduced what he calls **agentic engineering** — the practice of orchestrating AI agents as an engineering discipline:
+AI coding agents lose everything between sessions. There's no persistent, structured memory — no way for an agent to know what decisions were made last week, what patterns the team follows, or what bugs have been fixed before.
 
-> "Agentic because the new default is that you are not writing the code directly 99% of the time, you are orchestrating agents who do and acting as oversight — engineering to emphasize that there is an art and science and expertise to it."
+This isn't a new observation. Multiple people have been working on it:
 
-This shift created a new problem: **agents need memory.** Not chat history, not vector embeddings — structured, traversable knowledge that persists across sessions and grows with every interaction.
+**Andrej Karpathy** described the most complete vision with his "LLM Knowledge Bases" system — LLMs that compile raw source documents (articles, papers, docs) into interconnected markdown wikis with summaries and backlinks. His system uses Obsidian Web Clipper to index articles, then has an LLM incrementally "compile" a wiki of .md files. At ~100 articles and ~400K words, it works well. He noted:
 
-## Why Everyone Reached for Obsidian
+> "I think there is room here for an incredible new product instead of a hacky collection of scripts."
 
-The most common developer use of Obsidian today is as a **patterns library** — storing coding patterns, architectural conventions, error handling approaches, and project-specific rules as interconnected markdown notes. An agent working in a codebase can be pointed at these patterns to understand "how we do things here." It's essentially a structured style guide that's traversable via `[[wikilinks]]`.
+**Railly Hugo** built an [Obsidian vault as a "Personal OS"](https://www.railly.dev/blog/agentic-second-brain/) — a persistence layer where AI coding agents store stack preferences, repo layouts, and past decisions across sessions.
 
-Karpathy took this further with his "LLM Knowledge Bases" system, where LLMs compile raw source documents into interconnected markdown wikis. In April 2026, he shared the architecture:
+**Developers broadly** have been using Obsidian as a **patterns library** — storing coding patterns, architectural conventions, and project rules as interconnected markdown notes that agents can reference.
 
-> "Something I'm finding very useful recently: using LLMs to build personal knowledge bases for various topics of research interest. A large fraction of my recent token throughput is going less into manipulating code, and more into manipulating [knowledge stored as markdown]."
+The concept is well-established. The question is implementation.
 
-His system uses Obsidian Web Clipper to index articles, then has an LLM incrementally "compile" a wiki of .md files with summaries and backlinks. At ~100 articles and ~400K words, it works well. He noted: **"I think there is room here for an incredible new product instead of a hacky collection of scripts."**
+## What Everyone Uses Today (and Where It Breaks)
 
-Railly Hugo built an [Obsidian vault as a "Personal OS"](https://www.railly.dev/blog/agentic-second-brain/) — a persistence layer where AI coding agents store stack preferences, repo layouts, and past decisions across Claude Code, Cursor, and Codex sessions.
-
-The pattern is clear: developers want their agents to have access to structured, interconnected knowledge — patterns, decisions, conventions, context — stored as markdown with wikilinks. Obsidian became the default tool for this because it already existed and supported the format.
+Obsidian became the default tool because it already existed and supported `[[wikilinks]]` and markdown. But it was designed for humans writing personal notes, not for agents programmatically querying a knowledge graph.
 
 ## Where Obsidian Breaks
 
@@ -47,15 +45,21 @@ The requirements are specific:
 5. **Atomic writes** — Update five related notes in one transaction, or none at all. File systems don't offer this.
 6. **Temporal awareness** — "What changed in the last 3 sessions?" and "What did we know about this before the refactor?" require versioned history, not just current state.
 
-## What Composia Does Differently
+## What Composia Actually Contributes
 
-Composia is an embedded graph database for knowledge, not a note-taking app. The key architectural difference:
+Composia is not a new idea. The concept of LLM knowledge bases, markdown wikis with wikilinks, and agent memory — these all exist. Karpathy described the vision, Obsidian provides the format, Neo4j provides graph databases.
+
+**Composia's contribution is narrow and specific: an embedded, agent-native graph engine for the knowledge base workflow.** It's plumbing, not a paradigm.
+
+Here's what that means concretely:
 
 **To be fair to Obsidian:** it does maintain a MetadataCache that incrementally indexes links, tags, and frontmatter as files change. It doesn't naively reparse the entire vault on every operation. Backlinks and the graph view are served from this in-memory cache, not from raw file reads each time.
 
 But the cache is still **derived from files and lives in memory.** On cold startup, every file must be read and parsed to rebuild it. The cache isn't queryable beyond what Obsidian's UI exposes — there's no API for "give me all notes where status=blocked that link to auth-module." And critically, the cache only exists while Obsidian is running as a desktop app. Agents running in CI, containers, or serverless functions can't use it.
 
 **Composia's graph is the primary data structure, persisted on disk.** Links, backlinks, properties, and tags are indexed in dedicated RocksDB sublevels. The graph survives process restarts with zero rebuild time. And every index is directly queryable via API.
+
+**To be fair to Neo4j:** it's a far more capable graph database. But it requires a running server — you can't embed it in a repo like SQLite. Composia trades Neo4j's query power for zero-infrastructure embeddability.
 
 **Lightweight traversal via auto-summaries.** Every note in Composia has a structured `summary` field with two layers:
 
@@ -91,17 +95,11 @@ These numbers represent the scenario agents actually face: programmatic access t
 
 ## What Composia Does NOT Do
 
-Composia is not a replacement for Obsidian as a personal note-taking app. Obsidian has:
+Composia is not a replacement for Obsidian as a personal note-taking app. Obsidian has a beautiful desktop UI, mobile app, Canvas, Dataview, and a mature community of millions. If you're a human writing personal notes, use Obsidian.
 
-- A beautiful desktop UI with graph visualization, theming, and hundreds of community plugins
-- A mobile app with sync
-- Canvas for visual thinking
-- Dataview for advanced queries within the app
-- A mature community of millions of users
+Composia also does **not** do what Karpathy described. His system has an LLM *compiling* raw sources into structured wiki entries — that's an ingestion/compilation pipeline. Composia is a storage and query layer. It could sit underneath a Karpathy-style compilation workflow, but it doesn't provide the compilation step itself. That's a gap, not a feature.
 
-If you're a human writing personal notes, use Obsidian. It's excellent at that.
-
-Composia is for the layer underneath — the programmatic knowledge graph that agents read and write at machine speed. It's the engine, not the interface.
+**What Composia is:** an embedded graph engine that indexes `[[wikilinks]]`, properties, and tags in RocksDB sublevels, exposing them via MCP tools and CLI for agents to query at machine speed. It handles the plumbing — storage, indexing, traversal, sync — not the intelligence.
 
 ## The Architecture
 
@@ -124,7 +122,7 @@ The same `[[wikilink]]` syntax Obsidian uses. The same markdown files developers
 
 ## Patterns: The Core Use Case
 
-The primary way developers use Obsidian with agents today is as a patterns library. Composia makes this a first-class capability with graph primitives:
+The most common way developers use Obsidian with agents today is as a patterns library. This isn't Composia's invention — developers were already doing this. Composia adds indexed graph traversal on top of it:
 
 ```
 .composia/kb/patterns/
@@ -142,7 +140,7 @@ In Composia:
 - `composia query applies_to services` — instant indexed lookup across all patterns. No scanning.
 - Pre-hook: when Claude is about to write a new service, the hook traverses related pattern nodes and surfaces them automatically.
 
-The difference: Obsidian stores patterns as documents. Composia stores them as **graph nodes with indexed edges and queryable properties.** The agent doesn't read files — it traverses a knowledge structure.
+The difference isn't conceptual — it's mechanical. Obsidian stores patterns as documents that agents access via file reads. Composia stores them as graph nodes with indexed edges and queryable properties, accessible via API calls. Same patterns, faster lookups.
 
 Agents interact via MCP tools, CLI commands, or direct library calls:
 
@@ -188,15 +186,18 @@ No JSON exports. No database dumps. No special migration tools. Just markdown in
 
 ## Who This Is For
 
-- **Developers** who want their AI coding agents to have persistent, structured memory across sessions
-- **Teams** who want shared project knowledge that syncs through git — the tool they already use
-- **Agent builders** who need an embedded graph database with zero infrastructure (`npm install`, 3 lines of code)
-- **Anyone** hitting Obsidian's limits at scale and needing programmatic graph operations
+- **Developers** who want programmatic graph queries on their knowledge base without running a server
+- **Teams** who want shared knowledge that syncs through git without special tooling
+- **Agent builders** who need an embedded graph database (`npm install`, 3 lines of code)
 
-## Links
+If Obsidian's file-based access is fast enough for your use case, you probably don't need Composia. If you're hitting performance walls with programmatic access at scale, or you need indexed property queries from CI/agents, that's where this helps.
 
-- [Karpathy's love letter to Obsidian](https://x.com/karpathy/status/1761467904737067456) — Why markdown + local files is the right philosophy
-- [Karpathy's LLM Knowledge Bases](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — The pattern Composia is built for
-- [Obsidian as a Personal OS for agents](https://www.railly.dev/blog/agentic-second-brain/) — The use case, with Obsidian's limitations
-- [What I learned building agents on Obsidian CLI](https://www.marknagelberg.com/what-i-learned-building-ai-agents-on-top-of-the-obsidian-cli/) — Performance reality at 700+ files
-- [Stop calling it memory](https://limitededitionjonathan.substack.com/p/stop-calling-it-memory-the-problem) — Why markdown files aren't databases
+## Prior Art and Influences
+
+Composia didn't invent any of these ideas. These are the people and projects that did:
+
+- [Karpathy's LLM Knowledge Bases](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — The vision: LLMs compiling knowledge into interconnected markdown wikis. Composia is a possible storage layer for this workflow, not the workflow itself.
+- [Karpathy's love letter to Obsidian](https://x.com/karpathy/status/1761467904737067456) — Why markdown + local files is the right philosophy. We agree and use the same format.
+- [Obsidian as a Personal OS for agents](https://www.railly.dev/blog/agentic-second-brain/) — Railly Hugo's architecture for agent persistence. Composia attempts to solve the same problem with an embedded DB instead of file reads.
+- [What I learned building agents on Obsidian CLI](https://www.marknagelberg.com/what-i-learned-building-ai-agents-on-top-of-the-obsidian-cli/) — Performance reality at 700+ files. Motivated the RocksDB approach.
+- [Stop calling it memory](https://limitededitionjonathan.substack.com/p/stop-calling-it-memory-the-problem) — Why markdown files aren't databases. We agree — that's why there's a database underneath.

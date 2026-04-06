@@ -1,17 +1,17 @@
 # Composia
 
-Embedded graph-backed knowledge base for AI agents. The SQLite of knowledge graphs.
+Embedded graph-backed knowledge base for AI agents.
 
-Composia gives AI agents persistent, traversable memory that lives in your repo. Notes are linked with `[[wikilinks]]`, relationships are indexed in RocksDB, and graph traversal is instant at any scale.
+RocksDB-indexed storage for `[[wikilink]]`-connected markdown notes, queryable via MCP tools and CLI. The concept of agent memory and LLM knowledge bases isn't new — Composia is an implementation of the storage and query layer.
 
-## Why
+## Why This Instead of Obsidian / Neo4j / Flat Files
 
-- **Embedded** — `npm install composia`. No server, no Docker, no infrastructure.
-- **Fast** — 1.3ms backlinks at 1M notes. 90ms local graph traversal. 7ms cold startup.
-- **Lightweight traversal** — Every note has a two-layer summary: a deterministic extract (instant, on every write, cannot drift) plus an LLM-generated semantic summary (async, with intent classification). Agents scan the graph reading summaries, fetch full content only when needed.
-- **Agent-native** — MCP server, CLI, session hooks. Built for Claude Code, not browsers.
+- **Embedded** — `npm install composia`. No server (unlike Neo4j), no desktop app required (unlike Obsidian's MetadataCache).
+- **Fast** — 1.3ms backlinks at 1M notes. 90ms local graph traversal. But these are RocksDB numbers, not magic — any embedded DB would be fast compared to file reads.
+- **Lightweight traversal** — Two-layer summaries (deterministic + LLM-generated) let agents scan the graph without reading full content. This is genuinely useful for agents.
+- **Agent-native** — MCP server, CLI, session hooks. The integration layer is the actual product, not just the database.
 - **Git-native** — Markdown files in git, RocksDB built locally. Teams sync through git, not exports.
-- **Obsidian-compatible** — Same `[[wikilink]]` syntax. Same markdown files.
+- **Obsidian-compatible** — Same `[[wikilink]]` syntax. Same markdown files. Not a new format.
 
 ## Quick Start
 
@@ -237,25 +237,24 @@ composia query language typescript    # All TypeScript-specific patterns
 
 ### LLM Knowledge Bases (Karpathy pattern)
 
-Andrej Karpathy [described](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) using LLMs to build personal knowledge bases — raw source documents compiled into interconnected markdown wikis. Composia is the product version of that workflow:
+Andrej Karpathy [described](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) using LLMs to compile raw source documents into interconnected markdown wikis — the concept and workflow are his. Composia doesn't do the compilation step (that's the LLM's job). What it provides is an indexed storage layer underneath:
 
 ```bash
-# Ingest articles, papers, docs into the graph
+# After your LLM compiles knowledge into notes:
 composia remember "[[transformer-architecture]] uses [[self-attention]] to process sequences in parallel, unlike [[rnn]] which processes sequentially. Key paper: Vaswani et al 2017. #ml #architecture"
 
-# The LLM agent compiles knowledge incrementally
 # Each save auto-indexes links, generates summaries, creates backlinks
 
 # Query across the knowledge base
 composia recall "How do transformers compare to RNNs for sequence modeling?"
 # → LLM traverses the graph, finds connected notes, synthesizes an answer
 
-# Health checks — find inconsistencies
+# Health checks
 composia gc --dry-run    # Find stale, low-relevance notes
 composia schema generate # Detect field fragmentation
 ```
 
-What Karpathy calls "an incredible new product instead of a hacky collection of scripts" — that's what Composia provides. Indexed graph instead of flat files. Instant queries instead of grep. Auto-summaries for lightweight traversal. Team sharing via git.
+Composia doesn't replace Karpathy's workflow — it's a possible backend for it. Indexed graph instead of flat files, instant queries instead of grep, team sharing via git. The intelligence is in the LLM; Composia handles the plumbing.
 
 ### Project Memory (auto-captured)
 
@@ -342,7 +341,7 @@ Composia works with any agent that can run shell commands or MCP:
 
 ## Performance (vs raw file-based access)
 
-Obsidian maintains an in-memory MetadataCache that speeds up queries while the app is running. But agents accessing a vault programmatically (via MCP, CLI, or filesystem) don't have that cache — they read files directly. These benchmarks compare Composia against that scenario, at 1,000,000 notes:
+**Important caveat:** These benchmarks compare Composia's RocksDB against raw file reads — the worst case. Obsidian's in-memory MetadataCache would be faster than file reads (though still slower than persistent indexes for cold startup). These numbers represent agents accessing a vault programmatically without the desktop app running, at 1,000,000 notes:
 
 | Operation | Composia | File reads (no cache) | Advantage |
 |---|---|---|---|
