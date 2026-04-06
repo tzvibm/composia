@@ -10,15 +10,17 @@ This shift created a new problem: **agents need memory.** Not chat history, not 
 
 ## Why Everyone Reached for Obsidian
 
-Karpathy himself uses Obsidian as the frontend for his "LLM Knowledge Bases" system, where LLMs compile raw source documents into interconnected markdown wikis. In April 2026, he shared the architecture:
+The most common developer use of Obsidian today is as a **patterns library** — storing coding patterns, architectural conventions, error handling approaches, and project-specific rules as interconnected markdown notes. An agent working in a codebase can be pointed at these patterns to understand "how we do things here." It's essentially a structured style guide that's traversable via `[[wikilinks]]`.
+
+Karpathy took this further with his "LLM Knowledge Bases" system, where LLMs compile raw source documents into interconnected markdown wikis. In April 2026, he shared the architecture:
 
 > "Something I'm finding very useful recently: using LLMs to build personal knowledge bases for various topics of research interest. A large fraction of my recent token throughput is going less into manipulating code, and more into manipulating [knowledge stored as markdown]."
 
-His system uses Obsidian Web Clipper to index articles, then has an LLM incrementally "compile" a wiki of .md files with summaries and backlinks. At ~100 articles and ~400K words, it works well.
+His system uses Obsidian Web Clipper to index articles, then has an LLM incrementally "compile" a wiki of .md files with summaries and backlinks. At ~100 articles and ~400K words, it works well. He noted: **"I think there is room here for an incredible new product instead of a hacky collection of scripts."**
 
-Railly Hugo took this further, building an [Obsidian vault as a "Personal OS"](https://www.railly.dev/blog/agentic-second-brain/) — a persistence layer where AI coding agents store stack preferences, repo layouts, and past decisions across Claude Code, Cursor, and Codex sessions.
+Railly Hugo built an [Obsidian vault as a "Personal OS"](https://www.railly.dev/blog/agentic-second-brain/) — a persistence layer where AI coding agents store stack preferences, repo layouts, and past decisions across Claude Code, Cursor, and Codex sessions.
 
-The pattern is clear: developers want their agents to remember context between sessions, and markdown + wikilinks is the natural format.
+The pattern is clear: developers want their agents to have access to structured, interconnected knowledge — patterns, decisions, conventions, context — stored as markdown with wikilinks. Obsidian became the default tool for this because it already existed and supported the format.
 
 ## Where Obsidian Breaks
 
@@ -119,6 +121,28 @@ npm install composia
 ```
 
 The same `[[wikilink]]` syntax Obsidian uses. The same markdown files developers already write. But underneath, every link is indexed, every property is queryable, and every change is versioned.
+
+## Patterns: The Core Use Case
+
+The primary way developers use Obsidian with agents today is as a patterns library. Composia makes this a first-class capability with graph primitives:
+
+```
+.composia/kb/patterns/
+├── error-handling.md      # "Use [[result-pattern]] not exceptions. Flows through [[error-middleware]]."
+├── result-pattern.md      # "---\napplies_to: [services, repositories]\n---\nReturn {ok, data} or {ok: false, error}"
+├── api-conventions.md     # "REST via [[naming-conventions]]. Auth via [[jwt-pattern]]."
+├── testing-patterns.md    # "[[arrange-act-assert]] for unit. [[test-containers]] for integration."
+└── di-pattern.md          # "Constructor injection. See [[service-registry]]."
+```
+
+In Obsidian, these are just files. Searching for "how do we handle errors" means reading each file. Finding all patterns that apply to services means grepping.
+
+In Composia:
+- `composia_graph("error-handling", 2)` — traverses the error pattern, the result pattern it depends on, the middleware it flows through, and the logging conventions it connects to. All via stored, indexed edges. Summaries on every node.
+- `composia query applies_to services` — instant indexed lookup across all patterns. No scanning.
+- Pre-hook: when Claude is about to write a new service, the hook traverses related pattern nodes and surfaces them automatically.
+
+The difference: Obsidian stores patterns as documents. Composia stores them as **graph nodes with indexed edges and queryable properties.** The agent doesn't read files — it traverses a knowledge structure.
 
 Agents interact via MCP tools, CLI commands, or direct library calls:
 

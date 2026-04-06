@@ -196,6 +196,150 @@ const changes = await kb.getRecentChanges({ since: '2026-04-01' });
 await engine.close();
 ```
 
+## Use Cases
+
+### Patterns Library
+
+The most common Obsidian use case for developers — and the one Composia is built for. Store coding patterns, architectural patterns, and conventions as connected notes that agents can pull up in the right context.
+
+```
+.composia/kb/patterns/
+├── error-handling.md
+│   "All services use [[result-pattern]] instead of throwing.
+│    Errors flow through [[error-middleware]]. See [[logging-conventions]]."
+│
+├── result-pattern.md
+│   "---
+│   language: typescript
+│   applies_to: [services, repositories]
+│   ---
+│   Return { ok: true, data } or { ok: false, error } instead of throwing."
+│
+├── api-conventions.md
+│   "REST endpoints follow [[naming-conventions]]. Auth via [[jwt-pattern]].
+│    Rate limiting via [[rate-limiter-middleware]]."
+│
+└── testing-patterns.md
+│   "Unit tests use [[arrange-act-assert]]. Integration tests use [[test-containers]].
+│    See [[mocking-conventions]] for external services."
+```
+
+When Claude is about to write a new service, the pre-hook traverses `patterns/` notes and surfaces relevant conventions. The agent doesn't just get a flat style guide — it gets a **traversable graph** of interconnected patterns. `composia_graph("error-handling", 2)` returns the error pattern, the result pattern it depends on, the middleware it flows through, and the logging conventions it connects to.
+
+```bash
+# Dev adds a new pattern
+composia remember "Services use dependency injection via constructor. See [[di-container]] and [[service-registry]] #pattern #architecture"
+
+# Query patterns by property
+composia query applies_to services    # All patterns that apply to services
+composia query language typescript    # All TypeScript-specific patterns
+```
+
+### LLM Knowledge Bases (Karpathy pattern)
+
+Andrej Karpathy [described](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) using LLMs to build personal knowledge bases — raw source documents compiled into interconnected markdown wikis. Composia is the product version of that workflow:
+
+```bash
+# Ingest articles, papers, docs into the graph
+composia remember "[[transformer-architecture]] uses [[self-attention]] to process sequences in parallel, unlike [[rnn]] which processes sequentially. Key paper: Vaswani et al 2017. #ml #architecture"
+
+# The LLM agent compiles knowledge incrementally
+# Each save auto-indexes links, generates summaries, creates backlinks
+
+# Query across the knowledge base
+composia recall "How do transformers compare to RNNs for sequence modeling?"
+# → LLM traverses the graph, finds connected notes, synthesizes an answer
+
+# Health checks — find inconsistencies
+composia gc --dry-run    # Find stale, low-relevance notes
+composia schema generate # Detect field fragmentation
+```
+
+What Karpathy calls "an incredible new product instead of a hacky collection of scripts" — that's what Composia provides. Indexed graph instead of flat files. Instant queries instead of grep. Auto-summaries for lightweight traversal. Team sharing via git.
+
+### Project Memory (auto-captured)
+
+Zero-effort knowledge accumulation. Every Claude Code session gets captured automatically:
+
+```bash
+# After 50 sessions, the graph knows:
+composia recall "What bugs have we fixed in payments?"
+# → "Three bugs: race condition in payment-processor (April 3),
+#    timeout in stripe-webhook (April 7), duplicate charge
+#    prevention (April 12). All linked to [[file-payments]]."
+
+composia recall "Why did we choose this database?"
+# → Finds [[chose-rocksdb]], traverses links to [[embedded-db]],
+#    [[neo4j-comparison]], [[performance-requirements]]
+```
+
+### Architecture Decision Records
+
+```
+.composia/kb/decisions/
+├── chose-rocksdb.md
+│   "---
+│   status: accepted
+│   date: 2026-04-01
+│   intent: decision
+│   ---
+│   # Chose RocksDB over Neo4j
+│   [[neo4j]] requires a server. [[rocksdb]] is embedded.
+│   Our use case needs [[zero-infrastructure]] deployment."
+│
+├── jwt-over-sessions.md
+│   "Chose [[jwt-tokens]] because [[session-cookies]] don't work
+│    with [[api-gateway]]. Trade-off: token size vs statelessness."
+```
+
+```bash
+composia query intent decision         # All decisions
+composia query status accepted         # All accepted decisions
+composia query status superseded       # Decisions that were changed
+composia history chose-rocksdb         # How this decision evolved
+```
+
+### Onboarding
+
+New team member joins. Instead of reading a stale wiki:
+
+```bash
+composia build                         # Build graph from team's kb/
+composia recall "How does auth work in this project?"
+# → Synthesized answer from 12 connected notes, with links to follow
+
+composia_graph("file-auth", 3)         # Visual map of everything auth-related
+composia query category onboarding     # Notes specifically for new devs
+```
+
+### Bug Tracking & Postmortems
+
+```bash
+composia remember "Race condition in [[payment-processor]]: two concurrent webhook calls both charged the customer. Fixed by adding [[idempotency-key]] check. Root cause: [[stripe-webhook]] doesn't guarantee exactly-once delivery. #bug #payments #postmortem"
+
+# Later, when working on payments again:
+composia recall "What bugs have affected payments?"
+# → Agent traverses [[file-payments]] → finds all linked bug notes
+
+# Trigger: auto-link any payment bug to the postmortem list
+composia trigger add payment-bugs \
+  --field category --op eq --value payments \
+  --action link --target payment-postmortems
+```
+
+### Multi-Agent Compatibility
+
+Composia works with any agent that can run shell commands or MCP:
+
+| Agent | Integration | How |
+|---|---|---|
+| **Claude Code** | MCP + Hooks | Full integration — 15 MCP tools, auto-capture, auto-traverse, rules |
+| **GitHub Copilot** | MCP | Same MCP server config — Copilot supports MCP servers |
+| **OpenAI Codex** | CLI | All CLI commands work from any terminal Codex can execute in |
+| **Cursor** | MCP | Same MCP server config |
+| **Windsurf** | CLI + MCP | Both interfaces available |
+| **Custom agents** | Library | `import { createEngine } from 'composia'` — 3 lines of code |
+
 ## Performance (vs raw file-based access)
 
 Obsidian maintains an in-memory MetadataCache that speeds up queries while the app is running. But agents accessing a vault programmatically (via MCP, CLI, or filesystem) don't have that cache — they read files directly. These benchmarks compare Composia against that scenario, at 1,000,000 notes:
