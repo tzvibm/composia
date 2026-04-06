@@ -2,6 +2,61 @@ import { ClassicLevel } from 'classic-level';
 import path from 'path';
 
 /**
+ * Generate a concise summary from markdown content.
+ * Strips frontmatter, headings, formatting. Extracts the first meaningful
+ * sentences + all [[wikilinks]] referenced. Capped at 300 chars.
+ */
+function generateSummary(content, title) {
+  if (!content) return title || '';
+
+  let text = content;
+
+  // Strip YAML frontmatter
+  text = text.replace(/^---\n[\s\S]*?\n---\n?/, '');
+
+  // Strip markdown headings (keep the text)
+  text = text.replace(/^#{1,6}\s+/gm, '');
+
+  // Collect all wikilinks
+  const links = [];
+  text.replace(/\[\[([^\]|#]+?)(?:[|#][^\]]*?)?\]\]/g, (_, target) => {
+    links.push(target.trim());
+  });
+
+  // Strip markdown formatting
+  text = text
+    .replace(/\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]/g, (_, target, display) => display || target) // wikilinks → text
+    .replace(/\*\*(.+?)\*\*/g, '$1')  // bold
+    .replace(/\*(.+?)\*/g, '$1')      // italic
+    .replace(/`([^`]+)`/g, '$1')      // inline code
+    .replace(/```[\s\S]*?```/g, '')   // code blocks
+    .replace(/^[-*•]\s+/gm, '')       // list markers
+    .replace(/^\d+\.\s+/gm, '')       // numbered list markers
+    .replace(/^>\s+/gm, '')           // blockquotes
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1'); // markdown links → text
+
+  // Get first meaningful lines (skip empty)
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  let summary = lines.slice(0, 3).join(' ');
+
+  // Cap at 300 chars
+  if (summary.length > 300) {
+    summary = summary.slice(0, 297) + '...';
+  }
+
+  // Append linked note IDs if any (so traversal shows connections at a glance)
+  if (links.length > 0) {
+    const linkStr = ' → ' + [...new Set(links)].slice(0, 10).join(', ');
+    // Only add if it fits
+    if (summary.length + linkStr.length < 500) {
+      summary += linkStr;
+    }
+  }
+
+  return summary || title || '';
+}
+
+/**
  * Composia Engine — RocksDB-backed graph store for notes and links.
  *
  * Sublevels:
@@ -44,10 +99,12 @@ export class Engine {
   async putNote(id, note) {
     const now = new Date().toISOString();
     const existing = await this.getNote(id).catch(() => null);
+    const content = note.content || '';
     const record = {
       id,
       title: note.title || id,
-      content: note.content || '',
+      content,
+      summary: generateSummary(content, note.title || id),
       tags: note.tags || [],
       properties: note.properties || existing?.properties || {},
       created: existing?.created || now,
@@ -314,7 +371,7 @@ export class Engine {
 
       const note = await this.getNote(id).catch(() => null);
       if (note) {
-        graph.nodes.push({ id: note.id, title: note.title });
+        graph.nodes.push({ id: note.id, title: note.title, summary: note.summary, tags: note.tags });
       }
 
       const forward = await this.getForwardLinks(id);

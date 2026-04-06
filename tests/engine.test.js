@@ -53,6 +53,18 @@ describe('Engine', () => {
     expect(notes).toHaveLength(3);
   });
 
+  it('auto-generates summary on save', async () => {
+    const note = await engine.putNote('sum', {
+      title: 'Auth System',
+      content: '---\nstatus: active\n---\n# Auth System\n\nWe use [[jwt-tokens]] for authentication.\nThe [[api-gateway]] validates them.\n\n#architecture',
+    });
+    expect(note.summary).toBeTruthy();
+    expect(note.summary).toContain('jwt-tokens');
+    expect(note.summary).toContain('api-gateway');
+    expect(note.summary).not.toContain('---'); // frontmatter stripped
+    expect(note.summary.length).toBeLessThan(500);
+  });
+
   // ── Links ────────────────────────────────────────────
 
   it('creates and queries forward links', async () => {

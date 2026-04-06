@@ -68,7 +68,7 @@ const TOOLS = [
   },
   {
     name: 'composia_search',
-    description: 'Search notes by keyword in title or content. Use this to find relevant past decisions, bugs, patterns before making changes.',
+    description: 'Search notes by keyword. Returns summaries (not full content) for fast scanning. Use composia_get to read full content of specific notes.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -90,7 +90,7 @@ const TOOLS = [
   },
   {
     name: 'composia_graph',
-    description: 'Traverse the local graph around a note up to a given depth. Returns connected nodes and edges — useful for understanding context and relationships.',
+    description: 'Traverse the local graph around a note. Returns nodes with summaries and edges — scan the neighborhood without reading full content. Use composia_get for deep dives.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -102,7 +102,7 @@ const TOOLS = [
   },
   {
     name: 'composia_list',
-    description: 'List recent notes in the knowledge graph. Returns IDs, titles, and tags.',
+    description: 'List notes with summaries. Lightweight — scan many notes without reading full content.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -183,7 +183,7 @@ async function handleTool(name, args) {
 
     case 'composia_search': {
       const results = await kb.search(args.query);
-      return results.map(n => ({ id: n.id, title: n.title, tags: n.tags, excerpt: n.content?.slice(0, 200) }));
+      return results.map(n => ({ id: n.id, title: n.title, tags: n.tags, summary: n.summary }));
     }
 
     case 'composia_links': {
@@ -198,10 +198,10 @@ async function handleTool(name, args) {
     case 'composia_list': {
       if (args.tag) {
         const notes = await kb.findByTag(args.tag);
-        return notes.slice(0, args.limit || 50).map(n => ({ id: n.id, title: n.title, tags: n.tags }));
+        return notes.slice(0, args.limit || 50).map(n => ({ id: n.id, title: n.title, tags: n.tags, summary: n.summary }));
       }
       const notes = await kb.listNotes({ limit: args.limit || 50 });
-      return notes.map(n => ({ id: n.id, title: n.title, tags: n.tags }));
+      return notes.map(n => ({ id: n.id, title: n.title, tags: n.tags, summary: n.summary }));
     }
 
     case 'composia_delete': {
@@ -224,7 +224,7 @@ async function handleTool(name, args) {
 
     case 'composia_semantic_search': {
       const results = await kb.semanticSearch(args.query, { limit: args.limit || 10 });
-      return results.map(n => ({ id: n.id, title: n.title, tags: n.tags, score: n._score, excerpt: n.content?.slice(0, 200) }));
+      return results.map(n => ({ id: n.id, title: n.title, tags: n.tags, score: n._score, summary: n.summary }));
     }
 
     case 'composia_template': {
