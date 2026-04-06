@@ -55,6 +55,8 @@ But the cache is still **derived from files and lives in memory.** On cold start
 
 **Composia's graph is the primary data structure, persisted on disk.** Links, backlinks, properties, and tags are indexed in dedicated RocksDB sublevels. The graph survives process restarts with zero rebuild time. And every index is directly queryable via API.
 
+**Lightweight traversal via auto-summaries.** Every note in Composia has an auto-generated `summary` field — the first few meaningful sentences plus all `[[wikilink]]` targets, stripped of markdown formatting, capped at 300 characters. When an agent traverses the graph, it reads summaries, not full content. It can scan hundreds of nodes in a single query, understand what each note is about and what it links to, then `composia_get` only the specific notes it needs to read in full. In Obsidian, all the content lives inside the file — there's no way to skim the graph without parsing every note's full markdown. This is the difference between scanning a table of contents and reading every page.
+
 The practical difference shows in our benchmarks — which compare Composia's RocksDB against **raw file-based reads** (the worst case for Obsidian, equivalent to cold startup or programmatic access without the desktop app running):
 
 | Operation | Composia | File-based (no cache) |
