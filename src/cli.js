@@ -182,6 +182,64 @@ program
     });
   });
 
+// ── Quick commands (for use from Claude CLI or terminal) ─
+
+program
+  .command('remember <text...>')
+  .description('Quickly save a piece of knowledge (auto-generates ID, parses [[links]] and #tags)')
+  .action(async (textParts, opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    const text = textParts.join(' ');
+    // Extract title from first sentence or first 60 chars
+    const title = text.split(/[.\n]/)[0].slice(0, 80);
+    const id = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `note-${Date.now().toString(36)}`;
+    await withKnowledge(globalOpts, async (kb) => {
+      const note = await kb.saveNote({ id, title, content: text });
+      console.log(`Saved: ${note.id} (${note.tags.length} tags, links auto-indexed)`);
+    });
+  });
+
+program
+  .command('recall <query...>')
+  .description('Search the knowledge graph for relevant notes')
+  .action(async (queryParts, opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    const query = queryParts.join(' ');
+    await withKnowledge(globalOpts, async (kb) => {
+      const results = await kb.search(query);
+      if (results.length === 0) {
+        console.log('No matching notes found.');
+        return;
+      }
+      for (const n of results.slice(0, 10)) {
+        console.log(`\n--- ${n.title} [${n.id}] ${n.tags?.map(t => '#' + t).join(' ') || ''}`);
+        console.log(n.content?.slice(0, 300));
+      }
+      if (results.length > 10) console.log(`\n... and ${results.length - 10} more`);
+    });
+  });
+
+program
+  .command('context <id>')
+  .description('Show a note with its links and backlinks — full context')
+  .action(async (id, opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    await withKnowledge(globalOpts, async (kb) => {
+      const note = await kb.getNote(id);
+      const { forward, backlinks } = await kb.getLinks(id);
+      console.log(`\n# ${note.title}`);
+      console.log(`Tags: ${note.tags?.map(t => '#' + t).join(' ') || 'none'}`);
+      console.log(`Updated: ${note.updated}\n`);
+      console.log(note.content);
+      if (forward.length) {
+        console.log(`\n→ Links to: ${forward.map(l => l.target).join(', ')}`);
+      }
+      if (backlinks.length) {
+        console.log(`← Linked from: ${backlinks.map(l => l.source).join(', ')}`);
+      }
+    });
+  });
+
 // ── Export / Import ──────────────────────────────────────
 
 program
