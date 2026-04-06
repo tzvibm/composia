@@ -179,11 +179,11 @@ const changes = await kb.getRecentChanges({ since: '2026-04-01' });
 await engine.close();
 ```
 
-## Performance (vs file-based / Obsidian-style)
+## Performance (vs raw file-based access)
 
-At 1,000,000 notes:
+Obsidian maintains an in-memory MetadataCache that speeds up queries while the app is running. But agents accessing a vault programmatically (via MCP, CLI, or filesystem) don't have that cache — they read files directly. These benchmarks compare Composia against that scenario, at 1,000,000 notes:
 
-| Operation | Composia | File-based | Advantage |
+| Operation | Composia | File reads (no cache) | Advantage |
 |---|---|---|---|
 | Cold startup | 622ms | 16,802ms | **27x faster** |
 | Local graph (depth 2) | 90ms | 15,140ms | **168x faster** |

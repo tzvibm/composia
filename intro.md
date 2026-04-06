@@ -28,7 +28,7 @@ The problem is that Obsidian was designed for humans writing personal notes, not
 
 **Performance at scale.** Mark Nagelberg [built an agent system](https://www.marknagelberg.com/what-i-learned-building-ai-agents-on-top-of-the-obsidian-cli/) on the Obsidian CLI with 700+ person files and discovered each CLI call takes ~1 second. Finding references for a person mentioned in 561 files would take 9+ minutes. His advice: bypass the CLI entirely and use direct filesystem access for reads — defeating the purpose of the tool.
 
-**No real queries.** Markdown files don't support filtering, sorting, or aggregation. You can't ask "show all notes where status=blocked that link to the auth module." You have to read every file and hope the agent finds what it needs.
+**No structured queries outside the app.** While Obsidian's Dataview plugin can run queries within the desktop app, there's no programmatic API for agents to query "all notes where status=blocked that link to the auth module." MCP servers that access vaults via the filesystem must read and parse files to answer such queries.
 
 **Not actually a database.** As one [critical analysis](https://limitededitionjonathan.substack.com/p/stop-calling-it-memory-the-problem) puts it: "Anthropic never designed .md files to be databases, but thousands of people are now building their AI systems on a foundation that was never meant to bear weight."
 
@@ -38,9 +38,9 @@ The problem is that Obsidian was designed for humans writing personal notes, not
 
 The requirements are specific:
 
-1. **Instant graph traversal** — "What's connected to the auth module?" should take milliseconds, not seconds of file parsing.
-2. **Indexed properties** — "All notes where priority=high and status=blocked" should be a key lookup, not a full scan.
-3. **Backlinks without reparsing** — If note A links to note B, finding that relationship should not require reading every file in the vault.
+1. **Instant graph traversal without a running app** — Obsidian's MetadataCache provides this, but only while the desktop app is running. Agents need it from a library call.
+2. **Indexed properties** — "All notes where priority=high and status=blocked" should be a key lookup. Obsidian's cache doesn't support arbitrary property queries across the vault.
+3. **Persistent indexes** — Obsidian rebuilds its cache on startup from files. Composia's indexes are persisted in RocksDB and survive restarts with zero rebuild time.
 4. **Embedded, zero-infrastructure** — Agents run in CI, in containers, in serverless functions. They can't depend on a desktop app being open.
 5. **Atomic writes** — Update five related notes in one transaction, or none at all. File systems don't offer this.
 6. **Temporal awareness** — "What changed in the last 3 sessions?" and "What did we know about this before the refactor?" require versioned history, not just current state.
@@ -49,22 +49,22 @@ The requirements are specific:
 
 Composia is an embedded graph database for knowledge, not a note-taking app. The key architectural difference:
 
-**Obsidian treats the graph as a derived view of text files.** Every operation starts with "read files, parse text, find links." The graph is rebuilt from scratch every time.
+**To be fair to Obsidian:** it does maintain a MetadataCache that incrementally indexes links, tags, and frontmatter as files change. It doesn't naively reparse the entire vault on every operation. Backlinks and the graph view are served from this in-memory cache, not from raw file reads each time.
 
-**Composia treats the graph as the primary data structure.** Links are indexed on write. Backlinks are stored bidirectionally. Properties are indexed in a dedicated sublevel. The text is stored inside the graph, not the other way around.
+But the cache is still **derived from files and lives in memory.** On cold startup, every file must be read and parsed to rebuild it. The cache isn't queryable beyond what Obsidian's UI exposes — there's no API for "give me all notes where status=blocked that link to auth-module." And critically, the cache only exists while Obsidian is running as a desktop app. Agents running in CI, containers, or serverless functions can't use it.
 
-This isn't a theoretical difference. At 1 million notes:
+**Composia's graph is the primary data structure, persisted on disk.** Links, backlinks, properties, and tags are indexed in dedicated RocksDB sublevels. The graph survives process restarts with zero rebuild time. And every index is directly queryable via API.
 
-| Operation | Composia | File-based (Obsidian-style) |
+The practical difference shows in our benchmarks — which compare Composia's RocksDB against **raw file-based reads** (the worst case for Obsidian, equivalent to cold startup or programmatic access without the desktop app running):
+
+| Operation | Composia | File-based (no cache) |
 |---|---|---|
 | Cold startup | 622ms | 16,802ms |
 | Local graph (depth 2) | 90ms | 15,140ms |
 | Backlinks | 1.3ms | 15,464ms |
 | Search | 71ms | 4,852ms |
 
-Backlinks at 1 million notes: **1.3 milliseconds vs 15 seconds.** That's a 12,000x difference.
-
-These aren't synthetic numbers. The [benchmark suite](src/benchmark.js) creates real notes with random wikilinks and measures actual RocksDB operations vs actual filesystem reads. The file-based approach is a faithful simulation of what Obsidian does internally.
+These numbers represent the scenario agents actually face: programmatic access to vault data without Obsidian's desktop app and its in-memory cache. When agents access an Obsidian vault via MCP or filesystem, they're doing file reads — not querying the MetadataCache.
 
 ## What Composia Does NOT Do
 
