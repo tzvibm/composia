@@ -126,8 +126,9 @@ Agents interact via MCP tools, CLI commands, or direct library calls:
 # Claude remembers something
 composia remember "Refactored auth to use [[jwt-tokens]] because [[session-cookies]] break with [[api-gateway]] #architecture"
 
-# Claude recalls before making changes
-composia recall "authentication"
+# Claude asks the graph a question — LLM reasons over the graph to find the answer
+composia recall "What did we decide about auth and why?"
+# → Synthesized answer referencing [[auth-decision]], [[jwt-migration]], [[api-gateway-config]]
 
 # Query indexed properties instantly
 composia query status blocked
@@ -138,6 +139,8 @@ composia changes --since 2026-04-01
 # Rules Claude follows automatically
 composia rules add "When changing auth files, always check the security audit note"
 ```
+
+The `recall` command and `composia_ask` MCP tool use LLM reasoning, not keyword matching. The LLM sees note summaries, generates multi-step query strategies (keyword search + property queries + graph traversal + temporal queries), executes them against the graph, then synthesizes a natural language answer. This is how an agent should interact with knowledge — through reasoning, not regex.
 
 ## Team Workflow
 

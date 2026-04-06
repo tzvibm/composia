@@ -19,7 +19,7 @@ composia sync                              # Write MCP/hook-created notes back t
 
 # Knowledge
 composia remember "chose RocksDB because [[embedded]] #architecture"
-composia recall "auth patterns"
+composia recall "What did we decide about auth?"  # LLM-powered query
 composia context <note-id>
 
 # Notes
@@ -75,7 +75,10 @@ Hooks (hooks.js)       parser.js             sync.js     ├── links subleve
 - **`src/knowledge.js`** — High-level service: CRUD, link/tag sync, property queries, temporal, triggers
 - **`src/sync.js`** — Bidirectional sync: kb/ markdown ↔ RocksDB
 - **`src/cli.js`** — CLI interface (commander)
-- **`src/mcp.js`** — MCP server exposing 10 tools for Claude Code integration
+- **`src/resolve.js`** — LLM-powered query resolution (natural language → multi-step graph queries → synthesized answer)
+- **`src/summarizer.js`** — Two-layer summaries: deterministic (instant) + LLM-generated (semantic)
+- **`src/schema.js`** — Property schema enforcement, alias normalization
+- **`src/mcp.js`** — MCP server exposing 12 tools for Claude Code integration
 - **`src/hooks.js`** — Session hooks: auto-capture (post) + auto-traverse (pre) + rules
 - **`src/init.js`** — Project setup: creates `.composia/` structure
 

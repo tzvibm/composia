@@ -29,13 +29,16 @@ composia remember "Fixed auth bug in [[session-handler]] by adding [[refresh-tok
 
 Both writes go to RocksDB (for instant queries) and `.composia/kb/` (for git).
 
-### Recall them
+### Recall them (LLM-powered)
 
 ```bash
-composia recall "auth"
+composia recall "What did we decide about auth last week?"
+composia recall "Why is the payments service slow?"
+composia recall "Everything related to the API gateway migration"
 composia context session-handler    # Shows note + all links + backlinks
-composia link graph session-handler --depth 2
 ```
+
+`recall` uses LLM reasoning — it generates query strategies (keyword search, property queries, graph traversal, recent changes), executes them, and synthesizes a natural language answer. Falls back to keyword search when no API key is set.
 
 ### Write markdown files directly
 
@@ -93,9 +96,9 @@ Add to `.claude/settings.json`:
 ```
 
 Claude can now:
-- **Read** the knowledge graph before making changes (surfaces relevant context)
+- **Ask** the knowledge graph natural language questions via `composia_ask` ("What did we decide about auth?")
+- **Read** notes and traverse links to understand relationships
 - **Write** to it after sessions (captures what was done)
-- **Traverse** links to understand relationships between concepts
 - **Follow rules** you define in plain English
 
 ### Rules (plain English directives)
@@ -170,8 +173,11 @@ const graph = await kb.getGraph('auth-decision', 2);
 // Indexed property queries
 const blocked = await kb.queryByProperty('status', 'blocked');
 
-// Semantic search
-const results = await kb.semanticSearch('authentication patterns');
+// LLM-powered query resolution
+const { createResolver } = await import('composia/resolve');
+const resolver = createResolver(kb);
+const answer = await resolver.resolve('What decisions were made about auth?');
+// → { answer: "Based on [[auth-decision]]...", notes: [...], strategies: [...] }
 
 // Temporal queries
 const history = await kb.getHistory('auth-decision');
@@ -201,7 +207,7 @@ Setup & Sync
 
 Knowledge
   composia remember <text>         Quick-save (writes to db + kb/)
-  composia recall <query>          Search the knowledge graph
+  composia recall <query>          LLM-powered query with reasoning (falls back to keyword search)
   composia context <id>            Show note with full link context
 
 Notes
