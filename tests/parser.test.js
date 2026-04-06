@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseLinks, parseTags, slugify } from '../src/parser.js';
+import { parseLinks, parseTags, parseFrontmatter, serializeFrontmatter, applyTemplate, slugify } from '../src/parser.js';
 
 describe('parseLinks', () => {
   it('parses simple wikilinks', () => {
@@ -65,6 +65,63 @@ describe('parseTags', () => {
 
   it('returns empty for no tags', () => {
     expect(parseTags('No tags here')).toEqual([]);
+  });
+});
+
+describe('parseFrontmatter', () => {
+  it('parses YAML frontmatter', () => {
+    const { properties, body } = parseFrontmatter('---\ntitle: My Note\ntags: [rust, js]\n---\n# Content');
+    expect(properties.title).toBe('My Note');
+    expect(properties.tags).toEqual(['rust', 'js']);
+    expect(body).toBe('# Content');
+  });
+
+  it('handles no frontmatter', () => {
+    const { properties, body } = parseFrontmatter('# Just content');
+    expect(properties).toEqual({});
+    expect(body).toBe('# Just content');
+  });
+
+  it('parses booleans and numbers', () => {
+    const { properties } = parseFrontmatter('---\ndraft: true\npriority: 5\n---\n');
+    expect(properties.draft).toBe(true);
+    expect(properties.priority).toBe(5);
+  });
+
+  it('strips quotes from values', () => {
+    const { properties } = parseFrontmatter('---\ntitle: "Quoted Title"\n---\n');
+    expect(properties.title).toBe('Quoted Title');
+  });
+});
+
+describe('serializeFrontmatter', () => {
+  it('serializes properties to YAML', () => {
+    const result = serializeFrontmatter({ title: 'Test', tags: ['a', 'b'] });
+    expect(result).toContain('title: Test');
+    expect(result).toContain('tags: [a, b]');
+    expect(result).toMatch(/^---\n/);
+    expect(result).toMatch(/\n---\n/);
+  });
+
+  it('returns empty string for no properties', () => {
+    expect(serializeFrontmatter({})).toBe('');
+    expect(serializeFrontmatter(null)).toBe('');
+  });
+});
+
+describe('applyTemplate', () => {
+  it('substitutes variables', () => {
+    const result = applyTemplate('# {{title}}\nBy {{author}}', { title: 'Test', author: 'Me' });
+    expect(result).toBe('# Test\nBy Me');
+  });
+
+  it('provides built-in date/time', () => {
+    const result = applyTemplate('Created: {{date}}');
+    expect(result).toMatch(/Created: \d{4}-\d{2}-\d{2}/);
+  });
+
+  it('preserves unknown placeholders', () => {
+    expect(applyTemplate('Hello {{unknown}}')).toBe('Hello {{unknown}}');
   });
 });
 

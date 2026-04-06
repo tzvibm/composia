@@ -46,6 +46,7 @@ export class Engine {
       title: note.title || id,
       content: note.content || '',
       tags: note.tags || [],
+      properties: note.properties || existing?.properties || {},
       created: existing?.created || now,
       updated: now,
     };

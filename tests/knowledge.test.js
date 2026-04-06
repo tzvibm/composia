@@ -99,4 +99,56 @@ describe('Knowledge', () => {
     const { backlinks } = await kb.getLinks('b');
     expect(backlinks).toHaveLength(0);
   });
+
+  // ── Frontmatter ──────────────────────────────────────
+
+  it('parses frontmatter from content', async () => {
+    await kb.saveNote({
+      id: 'fm',
+      title: 'FM',
+      content: '---\ntitle: From Frontmatter\npriority: 1\ntags: [important]\n---\n# Body here',
+    });
+    const note = await kb.getNote('fm');
+    expect(note.properties.priority).toBe(1);
+    expect(note.tags).toContain('important');
+  });
+
+  it('gets and sets properties', async () => {
+    await kb.saveNote({ id: 'p', title: 'P', content: 'test' });
+    await kb.setProperties('p', { status: 'draft', priority: 3 });
+    const props = await kb.getProperties('p');
+    expect(props.status).toBe('draft');
+    expect(props.priority).toBe(3);
+  });
+
+  it('deletes a property', async () => {
+    await kb.saveNote({ id: 'dp', title: 'DP', content: 'test' });
+    await kb.setProperties('dp', { a: 1, b: 2 });
+    await kb.deleteProperty('dp', 'a');
+    const props = await kb.getProperties('dp');
+    expect(props.a).toBeUndefined();
+    expect(props.b).toBe(2);
+  });
+
+  // ── Semantic Search ──────────────────────────────────
+
+  it('semantic search ranks by relevance', async () => {
+    await kb.saveNote({ id: 'rust-guide', title: 'Rust Programming Guide', content: 'Rust is a systems programming language focused on safety' });
+    await kb.saveNote({ id: 'js-guide', title: 'JavaScript Guide', content: 'JavaScript is a dynamic programming language for the web' });
+    await kb.saveNote({ id: 'cooking', title: 'Pasta Recipe', content: 'Boil water and add pasta' });
+
+    const results = await kb.semanticSearch('rust programming');
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].id).toBe('rust-guide');
+  });
+
+  // ── Templates ────────────────────────────────────────
+
+  it('creates note from template', async () => {
+    const template = '---\ntitle: {{title}}\nstatus: draft\n---\n# {{title}}\n\nCreated on {{date}}';
+    const note = await kb.createFromTemplate(template, { title: 'My Decision' });
+    expect(note.title).toBe('My Decision');
+    expect(note.content).toContain('# My Decision');
+    expect(note.content).toMatch(/Created on \d{4}-\d{2}-\d{2}/);
+  });
 });

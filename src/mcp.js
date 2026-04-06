@@ -122,6 +122,44 @@ const TOOLS = [
       required: ['id'],
     },
   },
+  {
+    name: 'composia_properties',
+    description: 'Get or set YAML frontmatter properties on a note. Use action "get" to read, "set" to update, "delete" to remove a property.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Note ID' },
+        action: { type: 'string', enum: ['get', 'set', 'delete'], description: 'Action to perform' },
+        key: { type: 'string', description: 'Property key (for set/delete)' },
+        value: { description: 'Property value (for set)' },
+      },
+      required: ['id', 'action'],
+    },
+  },
+  {
+    name: 'composia_semantic_search',
+    description: 'Find notes semantically similar to a query. Uses TF-IDF scoring to rank by relevance, not just keyword matching.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Natural language query' },
+        limit: { type: 'number', description: 'Max results (default 10)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'composia_template',
+    description: 'Create a note from a template. Templates use {{variable}} placeholders. Built-in vars: {{date}}, {{time}}, {{timestamp}}, {{id}}.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        template: { type: 'string', description: 'Markdown template with {{placeholders}}' },
+        vars: { type: 'object', description: 'Variables to substitute (e.g. { "title": "My Note" })' },
+      },
+      required: ['template'],
+    },
+  },
 ];
 
 // ── Tool Handlers ───────────────────────────────────────
@@ -169,6 +207,29 @@ async function handleTool(name, args) {
     case 'composia_delete': {
       await kb.deleteNote(args.id);
       return { deleted: args.id };
+    }
+
+    case 'composia_properties': {
+      if (args.action === 'get') {
+        return await kb.getProperties(args.id);
+      } else if (args.action === 'set') {
+        await kb.setProperties(args.id, { [args.key]: args.value });
+        return { updated: args.id, key: args.key, value: args.value };
+      } else if (args.action === 'delete') {
+        await kb.deleteProperty(args.id, args.key);
+        return { deleted_property: args.key, from: args.id };
+      }
+      throw new Error('action must be get, set, or delete');
+    }
+
+    case 'composia_semantic_search': {
+      const results = await kb.semanticSearch(args.query, { limit: args.limit || 10 });
+      return results.map(n => ({ id: n.id, title: n.title, tags: n.tags, score: n._score, excerpt: n.content?.slice(0, 200) }));
+    }
+
+    case 'composia_template': {
+      const note = await kb.createFromTemplate(args.template, args.vars || {});
+      return { created: { id: note.id, title: note.title, tags: note.tags } };
     }
 
     default:
