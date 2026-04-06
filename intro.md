@@ -55,17 +55,24 @@ But the cache is still **derived from files and lives in memory.** On cold start
 
 **Composia's graph is the primary data structure, persisted on disk.** Links, backlinks, properties, and tags are indexed in dedicated RocksDB sublevels. The graph survives process restarts with zero rebuild time. And every index is directly queryable via API.
 
-**Lightweight traversal via auto-summaries.** Every note in Composia has a structured `summary` field, regenerated deterministically on every save. The summary contains three parts:
+**Lightweight traversal via auto-summaries.** Every note in Composia has a structured `summary` field with two layers:
 
-- **body**: First meaningful sentences of the note, stripped of all markdown formatting and frontmatter, capped at 280 characters
-- **links**: All `[[wikilink]]` targets referenced in the content (up to 20)
-- **sections**: All `##` headings — the structural outline of the note
+**Layer 1 — Deterministic (instant, on every save):**
+- **body**: First meaningful sentences, stripped of markdown formatting (280 chars)
+- **links**: All `[[wikilink]]` targets referenced (up to 20)
+- **sections**: All `##` headings — structural outline
+- **hash**: SHA-256 of content (16 chars) for staleness detection
 
-Plus a **content hash** (SHA-256, 16 chars) so consumers can verify the summary is current.
+This layer is computed synchronously as part of the write operation. It cannot drift from content because there's no separate update path. It's always available, even without an API key.
 
-Summaries are **deterministic, not LLM-generated.** They're extracted FROM the content, not generated ABOUT it. No API calls, no latency, no cost, no hallucination. And because they're regenerated on every save as part of the same write operation, they **cannot drift from the content** — there's no separate update path.
+**Layer 2 — LLM-generated (async, semantic):**
+- **body**: Semantic summary that captures meaning, not just first sentences ("Decision to use JWT over sessions due to API gateway constraints" vs "We use jwt-tokens for authentication")
+- **intent**: Classification — decision, bug, pattern, architecture, reference, session, general
+- **keywords**: Key terms not already in the title or links
 
-When an agent traverses the graph via `composia_graph` or `composia_list`, it gets summaries for every node. It can scan hundreds of notes in a single call — understanding what each note is about (body), what it connects to (links), and how it's structured (sections) — then `composia_get` only the specific notes it needs to read in full.
+Since Composia is always used with an LLM agent, the LLM is always available. The deterministic summary serves as an immediate placeholder; the LLM summary replaces it async when ready. The deterministic links/sections/hash are always preserved regardless.
+
+When an agent traverses the graph via `composia_graph` or `composia_list`, it gets summaries for every node. It can scan hundreds of notes in a single call — understanding what each note is about (body), what it connects to (links), how it's structured (sections), and what kind of knowledge it represents (intent) — then `composia_get` only the specific notes it needs to read in full.
 
 In Obsidian, all the content lives inside the file — there's no way to skim the graph without parsing every note's full markdown. It's the difference between scanning a table of contents and reading every chapter.
 

@@ -8,7 +8,7 @@ Composia gives AI agents persistent, traversable memory that lives in your repo.
 
 - **Embedded** — `npm install composia`. No server, no Docker, no infrastructure.
 - **Fast** — 1.3ms backlinks at 1M notes. 90ms local graph traversal. 7ms cold startup.
-- **Lightweight traversal** — Every note has a structured summary (body + links + sections + content hash), regenerated deterministically on every write. Agents scan the graph reading summaries, fetch full content only when needed. Summaries are extracted from content, not LLM-generated — they cannot hallucinate or drift.
+- **Lightweight traversal** — Every note has a two-layer summary: a deterministic extract (instant, on every write, cannot drift) plus an LLM-generated semantic summary (async, with intent classification). Agents scan the graph reading summaries, fetch full content only when needed.
 - **Agent-native** — MCP server, CLI, session hooks. Built for Claude Code, not browsers.
 - **Git-native** — Markdown files in git, RocksDB built locally. Teams sync through git, not exports.
 - **Obsidian-compatible** — Same `[[wikilink]]` syntax. Same markdown files.
@@ -225,7 +225,13 @@ Temporal
   composia changes                 Recent activity across graph
   composia snapshot <label>        Save full context snapshot
 
-Stats
+Schema
+  composia schema generate         Auto-generate schema from existing notes
+  composia schema show             Show current field definitions
+
+Maintenance
+  composia summarize               Generate LLM summaries for all notes
+  composia gc                      Archive stale, low-relevance notes
   composia stats                   Database statistics
 ```
 
