@@ -51,16 +51,65 @@ async function preToolCall() {
 
     const output = [];
 
-    // 1. Search for relevant knowledge
-    const searchTerms = [];
-    if (toolInput.file_path) {
-      searchTerms.push(path.basename(toolInput.file_path, path.extname(toolInput.file_path)));
-    }
-    if (toolInput.command) {
-      searchTerms.push(...toolInput.command.split(/\s+/).filter(w => w.length > 3 && !w.startsWith('-')).slice(0, 3));
+    // Extract context from tool input
+    const filePath = toolInput.file_path || '';
+    const filename = filePath ? path.basename(filePath, path.extname(filePath)) : '';
+    const command = toolInput.command || '';
+
+    // ── 1. Graph traversal: find notes linked to this file ──
+    if (filename) {
+      const fileNoteId = `file-${filename}`;
+      const slugId = filename.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+      // Try direct note lookup and backlink traversal
+      for (const tryId of [fileNoteId, slugId, filename]) {
+        try {
+          const { forward, backlinks } = await kb.getLinks(tryId);
+          if (forward.length > 0 || backlinks.length > 0) {
+            const linkedIds = [...forward.map(l => l.target), ...backlinks.map(l => l.source)];
+            const linkedNotes = [];
+            for (const id of linkedIds.slice(0, 5)) {
+              const note = await kb.engine.getNote(id).catch(() => null);
+              if (note) linkedNotes.push(note);
+            }
+            if (linkedNotes.length > 0) {
+              output.push(`Graph context for ${filename}:`);
+              for (const n of linkedNotes) {
+                const summary = typeof n.summary === 'object' ? n.summary.body : (n.summary || '');
+                output.push(`  - [[${n.id}]] ${n.title}: ${summary.slice(0, 120)}`);
+              }
+            }
+            break;
+          }
+        } catch {}
+      }
+
+      // ── 2. Property index: find blocked or flagged notes related to this ──
+      try {
+        const blocked = await kb.queryByProperty('status', 'blocked');
+        const relevant = blocked.filter(n =>
+          n.content?.includes(`[[${slugId}]]`) ||
+          n.content?.includes(`[[${fileNoteId}]]`) ||
+          n.content?.toLowerCase().includes(filename.toLowerCase())
+        );
+        if (relevant.length > 0) {
+          output.push(`⚠ Blocked notes referencing ${filename}:`);
+          for (const n of relevant) {
+            output.push(`  - [[${n.id}]] ${n.title} (status: blocked)`);
+          }
+        }
+      } catch {}
     }
 
-    if (searchTerms.length > 0) {
+    // ── 3. Keyword search fallback for additional context ──
+    const searchTerms = [];
+    if (filename) searchTerms.push(filename);
+    if (command) {
+      searchTerms.push(...command.split(/\s+/).filter(w => w.length > 3 && !w.startsWith('-')).slice(0, 3));
+    }
+
+    if (searchTerms.length > 0 && output.length === 0) {
+      // Only fall back to search if graph traversal found nothing
       const results = [];
       for (const term of searchTerms) {
         results.push(...await kb.search(term));
@@ -73,14 +122,15 @@ async function preToolCall() {
       }).slice(0, 5);
 
       if (unique.length > 0) {
-        output.push('Relevant knowledge:');
+        output.push('Related knowledge:');
         for (const n of unique) {
-          output.push(`  - ${n.title}: ${n.content?.slice(0, 120)}...`);
+          const summary = typeof n.summary === 'object' ? n.summary.body : (n.summary || '');
+          output.push(`  - [[${n.id}]] ${n.title}: ${summary.slice(0, 120)}`);
         }
       }
     }
 
-    // 2. Check if any rules apply to this file/context
+    // ── 4. Surface matching rules ──
     const rules = await getRulesForContext(kb, toolInput);
     if (rules.length > 0) {
       output.push('Active rules:');
@@ -232,10 +282,26 @@ async function postSession() {
       tags: ['session', 'auto-captured'],
     });
 
-    // Also save a context snapshot automatically
-    await kb.saveContextSnapshot(`session-${sessionId}`);
+    // Create/update file nodes in the graph — makes files first-class graph citizens
+    for (const filePath of filesModified) {
+      const filename = path.basename(filePath, path.extname(filePath));
+      const fileNoteId = `file-${filename}`;
+      const existing = await kb.engine.getNote(fileNoteId).catch(() => null);
 
-    process.stderr.write(`[Composia] Session captured: ${sessionId}\n`);
+      // Build file note with backlinks to all sessions that touched it
+      const existingContent = existing?.content || `# ${filename}\n\nFile: \`${filePath}\`\n`;
+      const sessionLink = `\n- [[${sessionId}]] (${timestamp.slice(0, 10)})`;
+
+      await kb.saveNote({
+        id: fileNoteId,
+        title: filename,
+        content: existingContent.trimEnd() + sessionLink + '\n',
+        tags: [...new Set([...(existing?.tags || []), 'file', 'auto-tracked'])],
+        properties: { ...existing?.properties, last_modified: timestamp, path: filePath },
+      });
+    }
+
+    process.stderr.write(`[Composia] Session captured: ${sessionId} (${filesModified.size} files tracked)\n`);
     await engine.close();
   } catch (err) {
     if (engine) await engine.close().catch(() => {});
