@@ -173,6 +173,30 @@ program
     });
   });
 
+// ── Summarize ───────────────────────────────────────────
+
+program
+  .command('summarize')
+  .description('Generate LLM summaries for all notes (requires ANTHROPIC_API_KEY or OPENAI_API_KEY)')
+  .action(async (opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    const { createSummarizer, enhanceAll } = await import('./summarizer.js');
+    const summarizer = createSummarizer();
+    if (!summarizer) {
+      console.error('No API key found. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.');
+      process.exit(1);
+    }
+    const engine = await createEngine(globalOpts.db || DEFAULT_DB);
+    console.log('Generating LLM summaries...');
+    const result = await enhanceAll(engine, summarizer, {
+      onProgress: (done, total, failed) => {
+        process.stdout.write(`\r  ${done}/${total} summarized${failed ? ` (${failed} failed)` : ''}`);
+      },
+    });
+    console.log(`\nDone: ${result.enhanced} enhanced, ${result.failed} failed, ${result.total} total`);
+    await engine.close();
+  });
+
 // ── Stats ────────────────────────────────────────────────
 
 program

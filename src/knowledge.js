@@ -1,12 +1,18 @@
 import { parseLinks, parseTags, parseFrontmatter, applyTemplate, slugify } from './parser.js';
+import { createSummarizer, enhanceSummary } from './summarizer.js';
 
 /**
  * Knowledge service — high-level operations over the engine.
  * Handles link syncing, tag extraction, frontmatter, and graph queries.
+ *
+ * Summaries: Every note gets an LLM-generated summary on save.
+ * The LLM is always available (this system is only used with agents).
+ * A deterministic fallback exists for the brief moment before the LLM responds.
  */
 export class Knowledge {
   constructor(engine) {
     this.engine = engine;
+    this._summarizer = createSummarizer();
   }
 
   /**
@@ -67,6 +73,13 @@ export class Knowledge {
     const fired = await this.engine.evaluateTriggers(noteId, note, existing);
     for (const { trigger } of fired) {
       await this._executeTriggerAction(trigger, noteId, note);
+    }
+
+    // Generate LLM summary (async, non-blocking — deterministic summary is already stored)
+    if (this._summarizer) {
+      enhanceSummary(this.engine, noteId, this._summarizer).catch(() => {
+        // LLM summary failed — deterministic summary remains as fallback
+      });
     }
 
     return note;
