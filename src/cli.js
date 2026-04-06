@@ -221,16 +221,16 @@ program
     const title = text.split(/[.\n]/)[0].slice(0, 80);
     const id = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `note-${Date.now().toString(36)}`;
 
-    // Write to RocksDB
-    await withKnowledge(globalOpts, async (kb) => {
-      await kb.saveNote({ id, title, content: text });
-    });
-
-    // Also write to kb/ so it's in git
+    // Write to kb/ file FIRST (if this fails, nothing in DB changed)
     const kbDir = path.join(process.cwd(), '.composia', 'kb');
     mkdirSync(kbDir, { recursive: true });
     writeFileSync(path.join(kbDir, `${id}.md`), text);
-    console.log(`Saved: ${id} (to db + .composia/kb/${id}.md)`);
+
+    // Then write to RocksDB
+    await withKnowledge(globalOpts, async (kb) => {
+      await kb.saveNote({ id, title, content: text });
+    });
+    console.log(`Saved: ${id} (to .composia/kb/${id}.md + db)`);
   });
 
 program
