@@ -78,7 +78,7 @@ Hooks (hooks.js)       parser.js             sync.js     ├── links subleve
 - **`src/resolve.js`** — LLM-powered query resolution (natural language → multi-step graph queries → synthesized answer)
 - **`src/summarizer.js`** — Two-layer summaries: deterministic (instant) + LLM-generated (semantic)
 - **`src/schema.js`** — Property schema enforcement, alias normalization
-- **`src/mcp.js`** — MCP server exposing 12 tools for Claude Code integration
+- **`src/mcp.js`** — MCP server exposing 15 tools for Claude Code integration
 - **`src/hooks.js`** — Session hooks: auto-capture (post) + auto-traverse (pre) + rules
 - **`src/init.js`** — Project setup: creates `.composia/` structure
 

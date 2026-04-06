@@ -95,11 +95,21 @@ Add to `.claude/settings.json`:
 }
 ```
 
-Claude can now:
-- **Ask** the knowledge graph natural language questions via `composia_ask` ("What did we decide about auth?")
-- **Read** notes and traverse links to understand relationships
-- **Write** to it after sessions (captures what was done)
-- **Follow rules** you define in plain English
+Claude now has 15 MCP tools exposing the full indexed graph:
+
+- **`composia_ask`** — natural language questions resolved via multi-step LLM reasoning
+- **`composia_graph`** — traverse the neighborhood around any node with summaries (primary exploration tool)
+- **`composia_links`** — stored forward links + backlinks (O(log n), not a scan)
+- **`composia_query`** — indexed property queries ("all notes where status=blocked")
+- **`composia_field_values`** — enumerate unique values across a field
+- **`composia_history`** / **`composia_changes`** — temporal queries (per-note history, graph-wide recent activity)
+- **`composia_save`** — write with auto-indexing of links, backlinks, properties, tags, summaries, triggers
+- **`composia_get`** — read full content (use after scanning summaries via graph/list)
+- **`composia_list`** / **`composia_search`** — scan and keyword search with summaries
+- **`composia_properties`** — get/set/delete indexed properties with schema normalization
+- **`composia_template`** / **`composia_delete`** — create from templates, delete with cleanup
+
+Claude uses the graph the way it's meant to be used — traversing indexed edges and summaries at machine speed, not grepping through files.
 
 ### Rules (plain English directives)
 
