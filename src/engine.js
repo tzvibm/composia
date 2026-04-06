@@ -2,58 +2,103 @@ import { ClassicLevel } from 'classic-level';
 import path from 'path';
 
 /**
- * Generate a concise summary from markdown content.
- * Strips frontmatter, headings, formatting. Extracts the first meaningful
- * sentences + all [[wikilinks]] referenced. Capped at 300 chars.
+ * Generate a deterministic summary from markdown content.
+ *
+ * DESIGN DECISIONS:
+ *
+ * 1. Deterministic, not LLM — summaries are generated algorithmically on every
+ *    write. No API calls, no latency, no cost, no hallucination. Guaranteed to
+ *    reflect actual content because it's extracted FROM the content, not
+ *    generated ABOUT it.
+ *
+ * 2. Regenerated on every save — not lazy, not cached separately. The summary
+ *    field is part of the note record. If content changes, the summary changes
+ *    in the same write. They CANNOT drift.
+ *
+ * 3. Content hash included — a hash of the full content is stored alongside
+ *    the summary. This lets consumers verify the summary is current and lets
+ *    optional LLM-enhanced summaries know when to regenerate.
+ *
+ * The summary has three parts:
+ *   - body: First meaningful sentences (stripped of markdown), capped at 280 chars
+ *   - links: All [[wikilink]] targets referenced in the content
+ *   - sections: All ## headings (structural outline)
+ *
+ * This gives agents three levels of understanding without reading full content:
+ *   - What is this note about? (body)
+ *   - What does it connect to? (links)
+ *   - How is it structured? (sections)
  */
+
+import { createHash } from 'crypto';
+
+function contentHash(content) {
+  return createHash('sha256').update(content || '').digest('hex').slice(0, 16);
+}
+
 function generateSummary(content, title) {
-  if (!content) return title || '';
+  if (!content) return { body: title || '', links: [], sections: [], hash: contentHash('') };
 
   let text = content;
 
   // Strip YAML frontmatter
   text = text.replace(/^---\n[\s\S]*?\n---\n?/, '');
 
-  // Strip markdown headings (keep the text)
-  text = text.replace(/^#{1,6}\s+/gm, '');
+  // Extract section headings (## and ###)
+  const sections = [];
+  text.replace(/^#{2,3}\s+(.+)$/gm, (_, heading) => {
+    sections.push(heading.trim());
+  });
 
   // Collect all wikilinks
   const links = [];
   text.replace(/\[\[([^\]|#]+?)(?:[|#][^\]]*?)?\]\]/g, (_, target) => {
     links.push(target.trim());
   });
+  const uniqueLinks = [...new Set(links)];
 
-  // Strip markdown formatting
-  text = text
-    .replace(/\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]/g, (_, target, display) => display || target) // wikilinks → text
-    .replace(/\*\*(.+?)\*\*/g, '$1')  // bold
-    .replace(/\*(.+?)\*/g, '$1')      // italic
-    .replace(/`([^`]+)`/g, '$1')      // inline code
-    .replace(/```[\s\S]*?```/g, '')   // code blocks
-    .replace(/^[-*•]\s+/gm, '')       // list markers
-    .replace(/^\d+\.\s+/gm, '')       // numbered list markers
-    .replace(/^>\s+/gm, '')           // blockquotes
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1'); // markdown links → text
+  // Strip markdown formatting for body text
+  let body = text
+    .replace(/^#{1,6}\s+/gm, '')     // headings
+    .replace(/\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]/g, (_, t, d) => d || t) // wikilinks → text
+    .replace(/\*\*(.+?)\*\*/g, '$1') // bold
+    .replace(/\*(.+?)\*/g, '$1')     // italic
+    .replace(/`([^`]+)`/g, '$1')     // inline code
+    .replace(/```[\s\S]*?```/g, '')  // code blocks
+    .replace(/^[-*•]\s+/gm, '')      // list markers
+    .replace(/^\d+\.\s+/gm, '')      // numbered list markers
+    .replace(/^>\s+/gm, '')          // blockquotes
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // markdown links → text
+    .replace(/(?:^|\s)#[a-zA-Z][a-zA-Z0-9_-]*/g, '') // strip #tags from body
+    .replace(/\n{2,}/g, '\n');       // collapse blank lines
 
-  // Get first meaningful lines (skip empty)
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-  let summary = lines.slice(0, 3).join(' ');
+  // Get first meaningful lines
+  const lines = body.split('\n').map(l => l.trim()).filter(l => l.length > 5);
+  body = lines.slice(0, 4).join(' ');
 
-  // Cap at 300 chars
-  if (summary.length > 300) {
-    summary = summary.slice(0, 297) + '...';
+  // Cap
+  if (body.length > 280) {
+    body = body.slice(0, 277) + '...';
   }
 
-  // Append linked note IDs if any (so traversal shows connections at a glance)
-  if (links.length > 0) {
-    const linkStr = ' → ' + [...new Set(links)].slice(0, 10).join(', ');
-    // Only add if it fits
-    if (summary.length + linkStr.length < 500) {
-      summary += linkStr;
-    }
-  }
+  return {
+    body: body || title || '',
+    links: uniqueLinks.slice(0, 20),
+    sections,
+    hash: contentHash(content),
+  };
+}
 
-  return summary || title || '';
+/**
+ * Serialize summary to a compact string for display.
+ */
+function formatSummary(summary) {
+  if (typeof summary === 'string') return summary; // legacy format
+  let str = summary.body || '';
+  if (summary.links?.length > 0) {
+    str += ' → ' + summary.links.slice(0, 10).join(', ');
+  }
+  return str;
 }
 
 /**

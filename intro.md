@@ -55,7 +55,19 @@ But the cache is still **derived from files and lives in memory.** On cold start
 
 **Composia's graph is the primary data structure, persisted on disk.** Links, backlinks, properties, and tags are indexed in dedicated RocksDB sublevels. The graph survives process restarts with zero rebuild time. And every index is directly queryable via API.
 
-**Lightweight traversal via auto-summaries.** Every note in Composia has an auto-generated `summary` field — the first few meaningful sentences plus all `[[wikilink]]` targets, stripped of markdown formatting, capped at 300 characters. When an agent traverses the graph, it reads summaries, not full content. It can scan hundreds of nodes in a single query, understand what each note is about and what it links to, then `composia_get` only the specific notes it needs to read in full. In Obsidian, all the content lives inside the file — there's no way to skim the graph without parsing every note's full markdown. This is the difference between scanning a table of contents and reading every page.
+**Lightweight traversal via auto-summaries.** Every note in Composia has a structured `summary` field, regenerated deterministically on every save. The summary contains three parts:
+
+- **body**: First meaningful sentences of the note, stripped of all markdown formatting and frontmatter, capped at 280 characters
+- **links**: All `[[wikilink]]` targets referenced in the content (up to 20)
+- **sections**: All `##` headings — the structural outline of the note
+
+Plus a **content hash** (SHA-256, 16 chars) so consumers can verify the summary is current.
+
+Summaries are **deterministic, not LLM-generated.** They're extracted FROM the content, not generated ABOUT it. No API calls, no latency, no cost, no hallucination. And because they're regenerated on every save as part of the same write operation, they **cannot drift from the content** — there's no separate update path.
+
+When an agent traverses the graph via `composia_graph` or `composia_list`, it gets summaries for every node. It can scan hundreds of notes in a single call — understanding what each note is about (body), what it connects to (links), and how it's structured (sections) — then `composia_get` only the specific notes it needs to read in full.
+
+In Obsidian, all the content lives inside the file — there's no way to skim the graph without parsing every note's full markdown. It's the difference between scanning a table of contents and reading every chapter.
 
 The practical difference shows in our benchmarks — which compare Composia's RocksDB against **raw file-based reads** (the worst case for Obsidian, equivalent to cold startup or programmatic access without the desktop app running):
 

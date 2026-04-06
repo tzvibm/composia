@@ -8,7 +8,7 @@ Composia gives AI agents persistent, traversable memory that lives in your repo.
 
 - **Embedded** — `npm install composia`. No server, no Docker, no infrastructure.
 - **Fast** — 1.3ms backlinks at 1M notes. 90ms local graph traversal. 7ms cold startup.
-- **Lightweight traversal** — Auto-generated summaries on every note. Agents scan the graph reading summaries, only fetch full content when needed. Obsidian requires parsing full file content to understand any note.
+- **Lightweight traversal** — Every note has a structured summary (body + links + sections + content hash), regenerated deterministically on every write. Agents scan the graph reading summaries, fetch full content only when needed. Summaries are extracted from content, not LLM-generated — they cannot hallucinate or drift.
 - **Agent-native** — MCP server, CLI, session hooks. Built for Claude Code, not browsers.
 - **Git-native** — Markdown files in git, RocksDB built locally. Teams sync through git, not exports.
 - **Obsidian-compatible** — Same `[[wikilink]]` syntax. Same markdown files.

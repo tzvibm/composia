@@ -53,16 +53,34 @@ describe('Engine', () => {
     expect(notes).toHaveLength(3);
   });
 
-  it('auto-generates summary on save', async () => {
+  it('auto-generates structured summary on save', async () => {
     const note = await engine.putNote('sum', {
       title: 'Auth System',
-      content: '---\nstatus: active\n---\n# Auth System\n\nWe use [[jwt-tokens]] for authentication.\nThe [[api-gateway]] validates them.\n\n#architecture',
+      content: '---\nstatus: active\n---\n# Auth System\n\nWe use [[jwt-tokens]] for authentication.\nThe [[api-gateway]] validates them.\n\n## Configuration\n\nSet the JWT secret in env.\n\n#architecture',
     });
+    // Summary is a structured object
     expect(note.summary).toBeTruthy();
-    expect(note.summary).toContain('jwt-tokens');
-    expect(note.summary).toContain('api-gateway');
-    expect(note.summary).not.toContain('---'); // frontmatter stripped
-    expect(note.summary.length).toBeLessThan(500);
+    expect(note.summary.body).toContain('jwt-tokens');
+    expect(note.summary.body).not.toContain('---'); // frontmatter stripped
+    expect(note.summary.links).toContain('jwt-tokens');
+    expect(note.summary.links).toContain('api-gateway');
+    expect(note.summary.sections).toContain('Configuration');
+    expect(note.summary.hash).toHaveLength(16);
+  });
+
+  it('summary hash changes when content changes', async () => {
+    const v1 = await engine.putNote('hash-test', { title: 'T', content: 'version one' });
+    const v2 = await engine.putNote('hash-test', { title: 'T', content: 'version two' });
+    expect(v1.summary.hash).not.toBe(v2.summary.hash);
+  });
+
+  it('summary cannot drift from content', async () => {
+    // Summary is regenerated on every putNote call — no separate update path
+    const note = await engine.putNote('drift', { title: 'T', content: 'Original about [[topic-a]]' });
+    expect(note.summary.links).toContain('topic-a');
+    const updated = await engine.putNote('drift', { title: 'T', content: 'Changed to [[topic-b]]' });
+    expect(updated.summary.links).toContain('topic-b');
+    expect(updated.summary.links).not.toContain('topic-a');
   });
 
   // ── Links ────────────────────────────────────────────
