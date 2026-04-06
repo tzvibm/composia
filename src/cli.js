@@ -24,6 +24,26 @@ function json(obj) {
 
 const program = new Command();
 
+// ── Init ─────────────────────────────────────────────────
+
+program
+  .command('init')
+  .description('Set up Composia in this project')
+  .action(async () => {
+    const { initProject } = await import('./init.js');
+    const { created, config } = initProject();
+    if (created.length) {
+      console.log('Created:');
+      created.forEach(f => console.log(`  ${f}`));
+    } else {
+      console.log('Composia already initialized.');
+    }
+    console.log('\nAdd to .claude/settings.json:');
+    console.log(JSON.stringify(config, null, 2));
+    console.log('\nPut markdown files in .composia/kb/ then run:');
+    console.log('  composia ingest');
+  });
+
 program
   .name('composia')
   .description('Graph-backed knowledge base for agents')
@@ -160,6 +180,83 @@ program
     await withKnowledge(globalOpts, async (kb) => {
       json(await kb.stats());
     });
+  });
+
+// ── Export / Import ──────────────────────────────────────
+
+program
+  .command('export')
+  .description('Export knowledge graph to JSON (pipe to file)')
+  .action(async (opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    const engine = await createEngine(globalOpts.db || DEFAULT_DB);
+    const kb = new (await import('./knowledge.js')).Knowledge(engine);
+    const notes = await kb.listNotes({ limit: 1000000 });
+    const dump = [];
+    for (const note of notes) {
+      const { forward } = await kb.getLinks(note.id);
+      dump.push({ ...note, _links: forward.map(l => l.target) });
+    }
+    console.log(JSON.stringify(dump, null, 2));
+    await engine.close();
+  });
+
+program
+  .command('import <file>')
+  .description('Import knowledge graph from JSON export')
+  .action(async (file, opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    const { readFileSync } = await import('fs');
+    const data = JSON.parse(readFileSync(file, 'utf-8'));
+    const engine = await createEngine(globalOpts.db || DEFAULT_DB);
+    const kb = new (await import('./knowledge.js')).Knowledge(engine);
+    let count = 0;
+    for (const note of data) {
+      await kb.saveNote({ id: note.id, title: note.title, content: note.content, tags: note.tags || [] });
+      count++;
+    }
+    console.log(`Imported ${count} notes`);
+    await engine.close();
+  });
+
+// ── Ingest markdown folder ──────────────────────────────
+
+program
+  .command('ingest [dir]')
+  .description('Ingest a folder of .md files into the graph (default: .composia/kb/)')
+  .action(async (dir, opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    const { readdirSync, readFileSync, statSync } = await import('fs');
+    const targetDir = dir || path.join(process.cwd(), '.composia', 'kb');
+    const engine = await createEngine(globalOpts.db || DEFAULT_DB);
+    const kb = new (await import('./knowledge.js')).Knowledge(engine);
+    const { slugify } = await import('./parser.js');
+
+    function walk(d) {
+      const files = [];
+      for (const entry of readdirSync(d)) {
+        const full = path.join(d, entry);
+        if (statSync(full).isDirectory()) {
+          files.push(...walk(full));
+        } else if (entry.endsWith('.md')) {
+          files.push(full);
+        }
+      }
+      return files;
+    }
+
+    const files = walk(targetDir);
+    let count = 0;
+    for (const file of files) {
+      const content = readFileSync(file, 'utf-8');
+      const rel = path.relative(targetDir, file).replace(/\.md$/, '');
+      const id = slugify(rel.replace(/[\\/]/g, '-'));
+      const title = rel.split(/[\\/]/).pop();
+      await kb.saveNote({ id, title, content });
+      count++;
+    }
+    console.log(`Ingested ${count} markdown files from ${targetDir}`);
+    await engine.close();
   });
 
 // ── Wikipedia Import ─────────────────────────────────────
