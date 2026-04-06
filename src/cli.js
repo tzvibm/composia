@@ -173,6 +173,68 @@ program
     });
   });
 
+// ── Schema ──────────────────────────────────────────────
+
+const schema = program.command('schema').description('Manage property schema');
+
+schema
+  .command('generate')
+  .description('Auto-generate schema.json from existing notes')
+  .action(async (opts, cmd) => {
+    const globalOpts = cmd.parent.parent.opts();
+    const { Schema } = await import('./schema.js');
+    const engine = await createEngine(globalOpts.db || DEFAULT_DB);
+    const generated = await Schema.generateFromNotes(engine);
+    const schemaPath = path.join(process.cwd(), '.composia', 'schema.json');
+    const { writeFileSync, mkdirSync } = await import('fs');
+    mkdirSync(path.dirname(schemaPath), { recursive: true });
+    writeFileSync(schemaPath, JSON.stringify(generated, null, 2));
+    console.log(`Schema generated: ${Object.keys(generated.fields).length} fields`);
+    console.log(`Saved to: ${schemaPath}`);
+    console.log('Edit to add aliases and adjust types.');
+    await engine.close();
+  });
+
+schema
+  .command('show')
+  .description('Show current schema')
+  .action(async () => {
+    const { loadSchema } = await import('./schema.js');
+    const s = loadSchema();
+    if (Object.keys(s.fields).length === 0) {
+      console.log('No schema defined. Run: composia schema generate');
+      return;
+    }
+    json(s.fields);
+  });
+
+// ── Garbage Collection ──────────────────────────────────
+
+program
+  .command('gc')
+  .description('Find and archive stale, low-relevance notes')
+  .option('--older-than <days>', 'minimum age in days', '30')
+  .option('--min-score <score>', 'archive notes with score below this', '3')
+  .option('--dry-run', 'show what would be archived without doing it')
+  .action(async (opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    await withKnowledge(globalOpts, async (kb) => {
+      const result = await kb.archiveStale({
+        olderThan: parseInt(opts.olderThan, 10),
+        minScore: parseInt(opts.minScore, 10),
+        dryRun: opts.dryRun,
+      });
+      if (opts.dryRun) {
+        console.log(`Would archive ${result.wouldArchive} notes:`);
+        for (const n of result.notes) {
+          console.log(`  ${n.id} (score: ${n.score}, age: ${n.ageDays}d, connections: ${n.connections})`);
+        }
+      } else {
+        console.log(`Archived ${result.archived} stale notes (tagged #archived)`);
+      }
+    });
+  });
+
 // ── Summarize ───────────────────────────────────────────
 
 program

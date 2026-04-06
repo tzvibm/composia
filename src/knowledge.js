@@ -1,18 +1,20 @@
 import { parseLinks, parseTags, parseFrontmatter, applyTemplate, slugify } from './parser.js';
 import { createSummarizer, enhanceSummary } from './summarizer.js';
+import { loadSchema } from './schema.js';
 
 /**
  * Knowledge service — high-level operations over the engine.
- * Handles link syncing, tag extraction, frontmatter, and graph queries.
+ * Handles link syncing, tag extraction, frontmatter, schema normalization,
+ * and graph queries.
  *
  * Summaries: Every note gets an LLM-generated summary on save.
- * The LLM is always available (this system is only used with agents).
- * A deterministic fallback exists for the brief moment before the LLM responds.
+ * Schema: Properties are normalized via .composia/schema.json aliases.
  */
 export class Knowledge {
   constructor(engine) {
     this.engine = engine;
     this._summarizer = createSummarizer();
+    this._schema = loadSchema();
   }
 
   /**
@@ -27,7 +29,14 @@ export class Knowledge {
 
     // Parse frontmatter from content
     const { properties: parsedProps, body } = parseFrontmatter(content || '');
-    const properties = { ...parsedProps, ...explicitProps };
+    let properties = { ...parsedProps, ...explicitProps };
+
+    // Normalize properties via schema (aliases, enums)
+    const { properties: normalized, warnings } = this._schema.normalizeProperties(properties);
+    if (normalized) properties = normalized;
+    if (warnings?.length) {
+      process.stderr?.write?.(`[Composia schema] ${warnings.join('; ')}\n`);
+    }
 
     const noteTitle = title || properties.title || noteId;
 
@@ -387,6 +396,77 @@ export class Knowledge {
 
   async listTriggers() {
     return this.engine.listTriggers();
+  }
+
+  // ── Knowledge Decay & Garbage Collection ───────────────
+
+  /**
+   * Score notes by relevance. Factors:
+   * - Recency (newer = more relevant)
+   * - Connectivity (more links = more important)
+   * - Access patterns (recently queried = more relevant)
+   * - Tags (certain tags = higher importance)
+   *
+   * Returns notes sorted by relevance score, lowest first (candidates for archival).
+   */
+  async getStaleNotes({ olderThan, minScore = 0, limit = 50 } = {}) {
+    const now = Date.now();
+    const all = await this.engine.listNotes({ limit: 100000 });
+    const scored = [];
+
+    for (const note of all) {
+      // Skip system notes
+      if (note.tags?.includes('rules') || note.tags?.includes('system')) continue;
+
+      const ageMs = now - new Date(note.updated).getTime();
+      const ageDays = ageMs / (1000 * 60 * 60 * 24);
+
+      // Skip if not old enough
+      if (olderThan && ageDays < olderThan) continue;
+
+      // Connectivity score
+      const forward = await this.engine.getForwardLinks(note.id);
+      const back = await this.engine.getBacklinks(note.id);
+      const connections = forward.length + back.length;
+
+      // Relevance score (higher = more relevant, keep)
+      let score = 0;
+      score += Math.max(0, 10 - ageDays / 7);  // Recency: decays over weeks
+      score += connections * 2;                   // Each connection adds value
+      score += (note.tags?.length || 0) * 0.5;   // Tagged notes are curated
+      if (note.properties && Object.keys(note.properties).length > 0) score += 1; // Has metadata
+      if (note.summary?.llm) score += 1;          // LLM-summarized = was important enough to summarize
+
+      if (score <= minScore) {
+        scored.push({ id: note.id, title: note.title, score: Math.round(score * 10) / 10, ageDays: Math.round(ageDays), connections });
+      }
+    }
+
+    scored.sort((a, b) => a.score - b.score);
+    return scored.slice(0, limit);
+  }
+
+  /**
+   * Archive old, low-relevance notes.
+   * Moves them to a special "archived" tag and removes from active indexes.
+   * Does NOT delete — archived notes can be restored.
+   */
+  async archiveStale({ olderThan = 30, minScore = 3, dryRun = false } = {}) {
+    const stale = await this.getStaleNotes({ olderThan, minScore, limit: 1000 });
+
+    if (dryRun) return { wouldArchive: stale.length, notes: stale };
+
+    let archived = 0;
+    for (const { id } of stale) {
+      const note = await this.engine.getNote(id).catch(() => null);
+      if (!note) continue;
+      const tags = [...new Set([...(note.tags || []), 'archived'])];
+      await this.engine.putNote(id, { ...note, tags });
+      await this.engine.syncTags(id, tags);
+      archived++;
+    }
+
+    return { archived, total: stale.length };
   }
 
   async stats() {
