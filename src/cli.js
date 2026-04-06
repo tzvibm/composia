@@ -317,42 +317,4 @@ program
     await engine.close();
   });
 
-// ── Wikipedia Import ─────────────────────────────────────
-
-program
-  .command('wikipedia')
-  .description('Import Wikipedia articles')
-  .option('-n, --count <n>', 'number of articles to import', '1000')
-  .action(async (opts, cmd) => {
-    const globalOpts = cmd.parent.opts();
-    const engine = await createEngine(globalOpts.db || DEFAULT_DB);
-    const kb = new (await import('./knowledge.js')).Knowledge(engine);
-    const { importWikipedia } = await import('./wikipedia.js');
-    const target = parseInt(opts.count, 10);
-    console.log(`Importing ${target} Wikipedia articles...`);
-    const result = await importWikipedia(kb, {
-      target,
-      onProgress: (done, total) => {
-        process.stdout.write(`\r  ${done}/${total} articles imported`);
-      },
-    });
-    console.log(`\nDone! ${result.imported} articles, ${result.links} links`);
-    await engine.close();
-  });
-
-// ── Web UI ───────────────────────────────────────────────
-
-program
-  .command('serve')
-  .description('Start the web UI with graph visualization')
-  .option('-p, --port <port>', 'port number', process.env.PORT || '3000')
-  .action(async (opts, cmd) => {
-    const globalOpts = cmd.parent.opts();
-    const { startServer } = await import('./server.js');
-    await startServer({
-      dbPath: globalOpts.db || DEFAULT_DB,
-      port: parseInt(opts.port, 10),
-    });
-  });
-
 program.parse();

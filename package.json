@@ -2,15 +2,18 @@
   "name": "composia",
   "version": "2.0.0",
   "type": "module",
-  "description": "Graph-backed knowledge base for agents. Like Obsidian, but with a real graph database.",
-  "main": "src/index.js",
+  "description": "Embedded graph-backed knowledge base for AI agents. The SQLite of knowledge graphs.",
+  "main": "src/engine.js",
   "bin": {
     "composia": "./src/cli.js"
   },
+  "exports": {
+    ".": "./src/engine.js",
+    "./knowledge": "./src/knowledge.js",
+    "./parser": "./src/parser.js",
+    "./engine": "./src/engine.js"
+  },
   "scripts": {
-    "start": "node src/cli.js serve",
-    "dev": "node src/cli.js serve",
-    "bench": "node src/benchmark.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -20,5 +23,6 @@
   },
   "devDependencies": {
     "vitest": "^2.1.0"
-  }
+  },
+  "keywords": ["knowledge-graph", "embedded-database", "ai-agent", "mcp", "obsidian-alternative", "rocksdb"]
 }

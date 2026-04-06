@@ -1,119 +1,141 @@
 # Composia
 
-A backend orchestration engine that assembles hierarchical data structures (trees) dynamically using an **Instruction Matrix**. It stitches atomic units of data based on caller authority (Namespaces).
+Embedded graph-backed knowledge base for AI agents. The SQLite of knowledge graphs.
 
-## Tech Stack
+Composia gives AI agents persistent, traversable memory that lives in your repo. Notes are linked with `[[wikilinks]]`, relationships are indexed in RocksDB, and graph traversal is instant at any scale.
 
-- **Runtime:** Node.js + Fastify
-- **Storage:** LMDB (embedded key-value store) via Rust native module (NAPI-RS)
-- **Validation:** Zod schemas
-- **Docs:** OpenAPI/Swagger at `/docs`
+## Why
+
+- **Embedded** — `npm install composia`. No server, no Docker, no infrastructure.
+- **Fast** — 1.3ms backlinks at 1M notes. 90ms local graph traversal. 7ms cold startup.
+- **Agent-native** — MCP server, CLI, session hooks. Built for Claude Code, not browsers.
+- **Obsidian-compatible** — Same `[[wikilink]]` syntax. Ingest existing markdown folders.
 
 ## Quick Start
 
 ```bash
-npm install
-npm run build      # Build Rust native module
-npm start          # Start server on PORT=3000
-npm run dev        # Development mode
-npm test           # Run tests
+npm install composia
+npx composia init
 ```
 
-## Architecture
-
-```
-API Layer (Fastify)  →  Service Layer  →  DAL  →  Rust Engine (LMDB)
-    routes/              services/        dal/       src/lib.rs
-    controllers/
-```
-
-### Databases (LMDB)
-
-- **units**: Key-value store (`id` → JSON payload with label)
-- **matrix**: Instruction relationships (`namespace:source:verb:target:order` → `{order, verb_value}`)
-- **namespaces**: Namespace registry (`namespace_id` → metadata)
-
-## Core Concepts
-
-### Units
-
-Atomic data containers with a 32-character hex ID, a label, and a JSON payload.
-
-### Namespaces
-
-User-provided unique identifiers for hierarchies. When resolving, the caller specifies which namespace to query. Access control is structural—different namespaces see different tree compositions from the same underlying units.
-
-### Instruction Matrix
-
-Defines relationships between units via verbs:
-
-| Verb | Purpose | verb_value |
-|------|---------|------------|
-| `UNIT` | Parent-child containment | — |
-| `HIDE` | Suppress unit from resolution | — |
-| `REPLACE` | Substitute one unit for another | replacement unit ID |
-| `OVERLAY` | Merge additional payload data | overlay unit ID |
-| `MOUNT` | Attach a namespace to a unit | namespace ID |
-
-### Mount Namespaces
-
-A unit with `MOUNT` verb carries its own namespace. During resolution, both the request namespace and mount namespace are checked, enabling cross-namespace composition.
-
-## Resolution Cycle
-
-The resolver executes an 8-step cycle for each unit:
-
-1. **Mount Check** — Detect if unit has a `MOUNT` verb (carries its own namespace)
-2. **Hide Check** — Check both namespaces for `HIDE` instruction
-3. **Replacement** — Apply `REPLACE` verbs (mount namespace first, then request namespace)
-4. **Overlay Retrieval** — Gather `OVERLAY` instructions from both namespaces
-5. **Merge** — Apply overlays in order (mount overlays first, request overlays override)
-6. **Structure Update** — Build final unit object with merged payload
-7. **Width Limitation** — Get child members respecting width limits and offset
-8. **Recurse** — Process children until depth limit reached
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/units` | Create units |
-| GET | `/units/:id` | Get unit by ID |
-| PATCH | `/units` | Update units |
-| DELETE | `/units` | Delete units |
-| POST | `/namespaces` | Register namespace |
-| GET | `/namespaces` | List namespaces |
-| GET | `/namespaces/:id` | Get namespace |
-| DELETE | `/namespaces/:id` | Delete namespace |
-| POST | `/matrix/link` | Create matrix entry |
-| DELETE | `/matrix/unlink` | Delete matrix entry |
-| GET | `/matrix/targets` | Get targets for source/verb |
-| POST | `/resolve` | Resolve hierarchy |
-| GET | `/health` | Health check |
-
-Full API documentation available at `http://localhost:3000/docs` when running.
-
-## System Invariants
-
-Environment-level limits prevent runaway recursion:
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `MAX_DEPTH` | 100 | Maximum recursion depth |
-| `MAX_WIDTH` | 10 | Maximum children per node |
-| `MAX_OVERLAYS` | 5 | Maximum overlay merges per unit |
-
-## Example: Resolution Request
+### Remember things
 
 ```bash
-curl -X POST http://localhost:3000/resolve \
-  -H "Content-Type: application/json" \
-  -d '{
-    "namespace": "admin_view",
-    "unit_id": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
-    "depth": 3,
-    "width": 10,
-    "include_ops": true
-  }'
+composia remember "We chose RocksDB because [[embedded-db]] requirements #architecture"
+composia remember "Fixed auth bug in [[session-handler]] by adding [[refresh-token-rotation]] #bugfix"
 ```
 
-Response includes the resolved hierarchy tree and optionally an operations log showing each step of the resolution cycle.
+### Recall them
+
+```bash
+composia recall "auth"
+composia context session-handler    # Shows note + all links + backlinks
+composia link graph session-handler --depth 2
+```
+
+### Ingest markdown files
+
+Put `.md` files in `.composia/kb/` with `[[wikilinks]]` between them:
+
+```
+.composia/kb/
+├── architecture/
+│   ├── auth-system.md       # "Uses [[jwt-tokens]] with [[api-gateway]]"
+│   └── database-choice.md   # "Chose [[rocksdb]] over [[neo4j]] because [[embedded-db]]"
+├── patterns/
+│   └── error-handling.md
+└── onboarding/
+    └── getting-started.md
+```
+
+```bash
+composia ingest
+```
+
+### Use with Claude Code
+
+Add to `.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "composia": {
+      "command": "node",
+      "args": ["node_modules/composia/src/mcp.js"]
+    }
+  },
+  "hooks": {
+    "Stop": [{
+      "command": "node node_modules/composia/src/hooks.js post",
+      "description": "Capture session to Composia knowledge graph"
+    }]
+  }
+}
+```
+
+Claude can now:
+- **Read** the knowledge graph before making changes (finds relevant context)
+- **Write** to it after sessions (captures what was done)
+- **Traverse** links to understand relationships between concepts
+
+### Team sharing
+
+```bash
+composia export > composia-snapshot.json   # Commit this to git
+composia import composia-snapshot.json     # Teammates rebuild locally
+```
+
+## Use as a library
+
+```javascript
+import { createEngine } from 'composia';
+import { Knowledge } from 'composia/knowledge';
+
+const engine = await createEngine('.composia/db');
+const kb = new Knowledge(engine);
+
+await kb.saveNote({
+  id: 'auth-decision',
+  title: 'Auth Architecture Decision',
+  content: 'We use [[jwt-tokens]] because [[session-cookies]] break with [[api-gateway]]. #architecture',
+});
+
+// Instant graph traversal
+const { forward, backlinks } = await kb.getLinks('jwt-tokens');
+const graph = await kb.getGraph('auth-decision', 2);
+const results = await kb.search('authentication');
+
+await engine.close();
+```
+
+## Performance (vs file-based / Obsidian-style)
+
+At 1,000,000 notes:
+
+| Operation | Composia | File-based | Advantage |
+|---|---|---|---|
+| Cold startup | 622ms | 16,802ms | **27x faster** |
+| Local graph (depth 2) | 90ms | 15,140ms | **168x faster** |
+| Backlinks | 1.3ms | 15,464ms | **11,987x faster** |
+| Search | 71ms | 4,852ms | **68x faster** |
+
+## CLI Reference
+
+```
+composia init                    Set up Composia in a project
+composia remember <text>         Quick-save knowledge with auto-linking
+composia recall <query>          Search the knowledge graph
+composia context <id>            Show note with full link context
+composia note add|get|rm|list    CRUD operations
+composia link from|to|graph      Query links and graph
+composia search <query>          Search by content
+composia tag <tag>               Find notes by tag
+composia stats                   Database statistics
+composia export                  Export to JSON
+composia import <file>           Import from JSON
+composia ingest [dir]            Ingest .md folder
+```
+
+## License
+
+MIT
