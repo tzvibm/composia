@@ -118,10 +118,30 @@ composia changes --since 2026-04-01
 composia rules add "When changing auth files, always check the security audit note"
 ```
 
+## Team Workflow
+
+There's no special sync protocol. Markdown files in `.composia/kb/` are the source of truth — they go in git like any other code. RocksDB is a local build artifact, like `node_modules`.
+
+```bash
+# Developer A captures knowledge during a session
+composia remember "Auth now uses [[jwt-tokens]] with [[refresh-token-rotation]] #architecture"
+# → writes to .composia/kb/auth-now-uses-jwt-tokens.md AND indexes in local RocksDB
+git add .composia/kb/ && git commit && git push
+
+# Developer B (or a new machine, or CI)
+git pull
+composia build    # Rebuilds RocksDB from kb/ files — indexes, links, backlinks, properties
+# → graph is ready, all queries instant
+```
+
+When Claude creates notes via MCP or hooks during a session, `composia sync` writes them back to `kb/` as markdown files for the next git commit.
+
+No JSON exports. No database dumps. No special migration tools. Just markdown in git and a local build step.
+
 ## Who This Is For
 
 - **Developers** who want their AI coding agents to have persistent, structured memory across sessions
-- **Teams** who want shared project knowledge that agents can query and update (via JSON export/import through git)
+- **Teams** who want shared project knowledge that syncs through git — the tool they already use
 - **Agent builders** who need an embedded graph database with zero infrastructure (`npm install`, 3 lines of code)
 - **Anyone** hitting Obsidian's limits at scale and needing programmatic graph operations
 
