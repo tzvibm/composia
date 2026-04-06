@@ -297,11 +297,27 @@ program
 
 program
   .command('recall <query...>')
-  .description('Search the knowledge graph for relevant notes')
+  .description('Search the knowledge graph — uses LLM reasoning when available, falls back to keyword search')
   .action(async (queryParts, opts, cmd) => {
     const globalOpts = cmd.parent.opts();
     const query = queryParts.join(' ');
     await withKnowledge(globalOpts, async (kb) => {
+      // Try LLM-powered resolution first
+      const { createResolver } = await import('./resolve.js');
+      const resolver = createResolver(kb);
+
+      if (resolver) {
+        const result = await resolver.resolve(query);
+        if (result.answer) {
+          console.log(result.answer);
+          if (result.notes?.length) {
+            console.log(`\nBased on: ${result.notes.map(n => n.id).join(', ')}`);
+          }
+          return;
+        }
+      }
+
+      // Fallback to keyword search
       const results = await kb.search(query);
       if (results.length === 0) {
         console.log('No matching notes found.');

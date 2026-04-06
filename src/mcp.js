@@ -160,6 +160,17 @@ const TOOLS = [
       required: ['template'],
     },
   },
+  {
+    name: 'composia_ask',
+    description: 'Ask a natural language question about the knowledge graph. Uses LLM reasoning to find relevant notes, traverse links, query properties, and synthesize an answer. Use this instead of composia_search when the query is complex or needs reasoning.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Natural language question, e.g. "What did we decide about auth last week?" or "Why is payments slow?" or "Everything related to the API gateway migration"' },
+      },
+      required: ['query'],
+    },
+  },
 ];
 
 // ── Tool Handlers ───────────────────────────────────────
@@ -230,6 +241,17 @@ async function handleTool(name, args) {
     case 'composia_template': {
       const note = await kb.createFromTemplate(args.template, args.vars || {});
       return { created: { id: note.id, title: note.title, tags: note.tags } };
+    }
+
+    case 'composia_ask': {
+      const { createResolver } = await import('./resolve.js');
+      const resolver = createResolver(kb);
+      if (!resolver) {
+        // Fallback to keyword search if no API key
+        const results = await kb.search(args.query);
+        return { answer: null, notes: results.slice(0, 10).map(n => ({ id: n.id, title: n.title, summary: n.summary })), fallback: true };
+      }
+      return await resolver.resolve(args.query);
     }
 
     default:
