@@ -2,11 +2,13 @@
 
 ## What This Is
 
-Composia is a context processing system that replaces chat history with graph-assembled context. It sits between the user and the LLM as a preprocessing and postprocessing layer. Every input (user prompt, LLM response, book chapter, code file) is decomposed into nodes and edges. Context is never an append-only log — it is always assembled from the graph.
+Composia is a context processing system that replaces chat history with graph-constructed context. It sits between the user and the LLM as a preprocessing and postprocessing layer. Every input (user prompt, LLM response, book chapter, code file) is decomposed into nodes and edges.
 
-The system maintains two graphs:
-- **Session graph** — short-term, built during the current interaction, ephemeral
-- **Global graph** — long-term, persistent across all sessions, learns through reinforcement
+The system maintains two graphs with distinct roles:
+- **Session graph** — short-term, built during the current interaction, ephemeral. **This is the constructed context. The answer comes from here.**
+- **Global graph** — long-term, persistent across all sessions, learns through reinforcement. **This is a learned prior. It proposes candidate nodes ("visitors") that may influence the session graph, but it does not produce answers directly.**
+
+The global graph is not a retrieval store. It does not supply answer content. It biases which concepts are considered — like a prior probability distribution over knowledge. The session graph is the only structure that produces the answer.
 
 The pipeline between them is Hebbian: nodes that appear repeatedly get consolidated, edges that repeat get reinforced. Truth converges. Hallucinations decay.
 
@@ -22,13 +24,19 @@ Chat history is an append-only log. It has no structural mechanism for truth.
 
 Every existing system (Mem0, Zep, Graphiti, LangMem) bolts a graph onto this broken foundation. They extract entities from chat history and store them in a graph, but the chat history remains the primary context sent to the LLM. The graph is supplementary. The broken foundation stays.
 
-Composia replaces the foundation. The graph is the context. Chat messages are ephemeral proposals that get decomposed into graph mutations, approved by the user, and discarded. Only the graph persists.
+Composia replaces the foundation. The session graph is the constructed context; the global graph influences it indirectly by proposing candidates. Chat messages are ephemeral proposals that get decomposed into graph mutations, approved by the user, and discarded. Only the graphs persist.
 
 ## Nodes
 
 A node is a markdown file. It represents a discrete, verifiable unit of knowledge — a claim, a concept, a fact, a question, an answer.
 
-A node is also a piece of **context-steering data**. It exists to be ingested into the LLM's context when traversal conditions are met, or simply by being linked. Every node is simultaneously content (readable information) and an instruction (when this topic comes up, this matters).
+A node is also a piece of **context-steering data**. It exists to influence the session graph when the LLM evaluates it as relevant. Every node is simultaneously content (readable information) and a potential influence (when this topic comes up, consider this).
+
+### Visitors
+
+A **visitor** is a node from the global graph that is proposed as a candidate for evaluation during a query. The global graph does not inject visitors into the session graph directly — it proposes them. The LLM evaluates each visitor's summary and decides whether to accept it. Accepted visitors have their content loaded and decomposed into the session graph, where they influence the constructed context. Rejected visitors are ignored.
+
+The term "visitor" is used throughout this document to distinguish proposed candidates from nodes that are already part of the session graph.
 
 ```markdown
 ---
@@ -62,13 +70,15 @@ the alternative we rejected.
 
 An edge is a connection between two nodes. It has two properties that matter: direction and weight.
 
-**Forward links** are like function calls. They say: "go get this context." When a node is being traversed and has a forward link, the system follows it to pull in that node's content.
+**Forward links** are like function calls. They say: "this node references that node." When a node is proposed as a visitor, its forward links identify other nodes that may also be proposed — but none are automatically included. The LLM evaluates each one.
 
-**Backlinks** are like return statements. They carry context back to the caller. When the system traverses from node A to node B via a forward link, node B's backlink to A carries B's relevant content back up the traversal path, enriching A's context.
+**Backlinks** are like return statements. They carry context back to the caller. When the session graph includes node B because of its relationship to node A, B's backlink to A carries B's relevant content back up the traversal path, enriching A's context within the session graph.
 
-**Weight** is purely repetition count. If the edge `auth → jwt` has appeared in 22 sessions, its weight is 22. Heavier edges are more likely to be followed during context assembly. No rules, no special logic. Just counting how many times the connection appeared.
+**Weight** is purely repetition count. If the edge `auth → jwt` has appeared in 22 sessions, its weight is 22. Higher weight means the edge is more likely to be proposed as a candidate connection during context assembly. But weight does not guarantee inclusion — the LLM evaluates whether to accept the proposal. No rules, no automatic traversal. Just counting how many times the connection appeared.
 
-Edges can span multiple hops. The path `auth → jwt → api-gateway → rate-limiting → redis` might never have been explicitly stated anywhere, but each individual edge was reinforced independently across different sessions. The system discovers multi-hop relationships that no single source ever articulated.
+**Edges do not imply relevance.** An edge only encodes co-occurrence — that two concepts appeared together repeatedly. It does not mean "this is relevant to the current answer." The LLM decides relevance. The edge only says "these concepts have been connected before, consider whether they should be connected now."
+
+Edges can span multiple hops. The path `auth → jwt → api-gateway → rate-limiting → redis` might never have been explicitly stated anywhere, but each individual edge was reinforced independently across different sessions. Whether the system follows that path in a given session depends on the LLM evaluating each hop — it is not automatic.
 
 ### Edge reinforcement is independent of node consolidation
 
@@ -88,13 +98,13 @@ The session graph is ephemeral. It does not persist after the session ends. Its 
 
 ### Global Graph (long-term)
 
-Persistent across all sessions. This is the system's learned knowledge — the accumulated, consolidated, reinforced graph of everything it has processed.
+Persistent across all sessions. The global graph is a **learned prior** — it encodes what concepts exist, how they've been connected historically, and how strongly those connections have been reinforced. It does not produce answers. It biases which concepts the session graph considers.
 
-At session start, the global graph is loaded as the system's structural context. The LLM knows what nodes exist, their summaries, their edge weights. It does not receive the full content of every node — it receives the graph structure and summaries, then traverses into specific nodes as needed.
+At session start, the global graph is available for the system to draw visitors from. The LLM knows what nodes exist, their summaries, their edge weights. It does not receive the full content of every node — it receives the graph structure and summaries, then proposes specific nodes as visitors to the session graph based on relevance to the current input.
 
 The global graph grows denser over time. Nodes that represent the same concept across multiple sessions get consolidated into single, canonical nodes. Edges that appear repeatedly get heavier. Nodes and edges that are never reinforced decay and eventually get pruned.
 
-The global graph is how the system learns. After processing 10 books on distributed systems, the graph has heavy, dense nodes for consensus, replication, and partitioning — because every book mentions them. Niche ideas from one book stay low-weight.
+The global graph is how the system learns. After processing 10 books on distributed systems, the graph has heavy, dense nodes for consensus, replication, and partitioning — because every book mentions them. Niche ideas from one book stay low-weight. But even a heavy node is only a strong candidate — it still requires LLM evaluation before it influences a session.
 
 ## The Hebbian Pipeline: Short-Term to Long-Term
 
@@ -136,7 +146,7 @@ All edges preserved. Node is denser.
 
 ### 4. Edge Reinforcement
 
-Independent of consolidation. Every time an edge appears in a session, its weight in the global graph increments by 1. If `payments → idempotency` appears in 15 sessions, that edge has weight 15. Heavier edges surface more readily during context assembly.
+Independent of consolidation. Every time an edge appears in a session, its weight in the global graph increments by 1. If `payments → idempotency` appears in 15 sessions, that edge has weight 15. Heavier edges are more likely to be proposed as candidate connections during context assembly — but the LLM evaluates each one.
 
 ### 5. Decay
 
@@ -189,93 +199,113 @@ Each chat session is a session (the original use case). User messages and LLM re
 
 The input format doesn't matter. Everything feeds the same loop: decompose → match → reinforce → consolidate.
 
+## Context Steering vs Answer Generation
+
+These are two distinct operations:
+
+**Context steering** is the process of building and evolving the session graph. The global graph influences this by proposing visitors. The LLM evaluates visitors. Accepted visitors become part of the session graph and influence subsequent iterations. Context steering is how the session graph grows and connects.
+
+**Answer generation** is the final synthesis from the converged session graph. Only the session graph produces the answer. The global graph's role is over — it influenced which visitors were proposed, but the answer is synthesized from what the session graph contains.
+
+The global graph steers context. The session graph generates answers. They do not overlap.
+
 ## The Query Loop: Convergence-Based Answering
 
 When a user asks a question, the system does not produce an immediate answer. It iterates until the session graph converges — until new iterations reinforce existing edges instead of discovering new ones.
 
 ### How a query is processed
 
-**1. Decompose the prompt into a graph query**
+**1. Decompose the prompt into a session graph**
 
 The user's prompt is not text to pass to an LLM. It is a graph with missing nodes — a question structure.
 
 ```
 User: "How should I handle auth in this microservice?"
 
-Decomposed:
+Decomposed into session graph:
   Node: "auth" (concept, needs resolution)
   Node: "microservice" (context constraint)
   Edge: auth → microservice (scoped: "auth IN this microservice")
   Type: "how" (seeking approach/pattern)
 ```
 
-**2. RAG finds dominant nodes**
+**2. Generate visitors from the global graph**
 
-The system uses vector similarity to find the highest-weight nodes in the global graph that match the query's nodes. Weight matters — heavily reinforced nodes surface first.
-
-```
-Matches:
-  auth          weight: 47
-  jwt           weight: 32
-  api-gateway   weight: 28
-  sessions      weight: 3  (weak)
-```
-
-**3. Find strongest edges between matched nodes**
-
-The system looks for high-weight paths connecting the matched nodes. These paths represent the strongest relationships the system has learned.
+The system uses vector similarity to find nodes in the global graph that match the session graph's nodes. These are **visitors** — candidates proposed for evaluation, not answers.
 
 ```
-Paths:
-  auth → jwt           weight: 22
-  jwt → api-gateway    weight: 18
-  auth → sessions      weight: 3 (weak, might be mentioned as alternative)
+Visitors proposed:
+  auth-node       weight: 47 (strong candidate)
+  jwt-node        weight: 32 (strong candidate)
+  api-gateway     weight: 28 (strong candidate)
+  sessions-node   weight: 3  (weak candidate)
 ```
 
-**4. Load actual content of high-weight nodes into LLM context**
+High-weight visitors are proposed first, but weight does not guarantee acceptance. Edges between visitors in the global graph may cause additional visitors to be proposed (e.g., jwt's edge to api-gateway proposes api-gateway as a visitor). But no visitor is automatically included.
 
-The content of the nodes along the strongest paths is assembled into the LLM's context. Not chat history — graph content, selected by edge weight.
+**3. LLM evaluates which visitors to accept**
 
-**5. LLM produces output**
+The LLM receives the visitor summaries and the current session graph. It decides which visitors are relevant to the current question. This is not automatic traversal — it is LLM-mediated selection.
 
-The LLM responds based on graph-assembled context.
+```
+LLM evaluation:
+  auth-node       → ACCEPT (directly relevant)
+  jwt-node        → ACCEPT (likely approach)
+  api-gateway     → ACCEPT (context constraint)
+  sessions-node   → REJECT (not relevant to this microservice)
+```
 
-**6. Decompose the output into new nodes and edges**
+**4. Accepted visitors influence the session graph**
 
-The LLM's response is decomposed. New nodes and edges are added to the session graph. Possibly a new connection is discovered: `jwt → rate-limiting` (the LLM mentioned this relationship).
+The content of accepted visitors is loaded. New nodes and edges are added to the session graph based on what the visitor content contains. The session graph grows.
 
-**7. RAG again with enriched session graph**
+The session graph now contains the decomposed prompt AND the accepted visitor content, connected by edges. This is the constructed context.
 
-With the session graph now larger, the system finds nodes missed on the first pass — reachable now through newly created edges.
+**5. LLM produces output from the session graph**
 
-**8. Repeat until convergence**
+The LLM responds based on context assembled from the session graph — not from the global graph, not from chat history. Only the session graph.
 
-The loop continues. Each iteration:
-- Decomposes new content into nodes/edges
-- Matches against session + global graph
-- Loads new node content into context
-- LLM produces refined output
+**6. Decompose the output into the session graph**
 
-**9. Detect convergence**
+The LLM's response is decomposed. New nodes and edges are added to the session graph. Possibly a new concept emerged: `jwt → rate-limiting` (the LLM mentioned this relationship).
 
-The system monitors whether new iterations are producing new nodes/edges or just reinforcing existing ones. When the session graph stabilizes — new iterations don't change the graph structure — the system has converged.
+**7. Generate new visitors from the enriched session graph**
+
+With the session graph now larger, new vectors from new nodes trigger new visitor proposals from the global graph. Nodes that weren't candidates before may now be proposed because of the new edges.
+
+**8. LLM evaluates new visitors**
+
+Same as step 3. The LLM decides which new visitors to accept.
+
+**9. Repeat until convergence**
+
+The loop continues:
+1. Build/expand session graph
+2. Generate visitors from global graph
+3. LLM evaluates which visitors to accept
+4. Accepted visitors influence next iteration of the session graph
+5. Repeat
+
+**10. Detect convergence**
+
+The system monitors whether new iterations are producing new nodes/edges in the session graph or just reinforcing existing ones. When the session graph stabilizes — new visitors are rejected because the session graph already contains equivalent knowledge — the system has converged.
 
 Convergence = confidence. The answer is ready.
 
-**10. Produce summary**
+**11. Produce answer from the session graph**
 
-The system synthesizes a final output from the converged session graph and presents it to the user.
+The system synthesizes a final output from the converged session graph and presents it to the user. The answer is a product of the session graph only.
 
 ```
 Convergence:
-  Iteration 1: 8 new nodes, 12 new edges
-  Iteration 2: 4 new nodes, 6 new edges, 3 reinforced
-  Iteration 3: 1 new node, 2 new edges, 8 reinforced
-  Iteration 4: 0 new nodes, 0 new edges, 11 reinforced
-  → CONVERGED → produce answer
+  Iteration 1: 8 new nodes, 12 new edges (session graph growing)
+  Iteration 2: 4 new nodes, 6 new edges, 3 reinforced (slowing)
+  Iteration 3: 1 new node, 2 new edges, 8 reinforced (stabilizing)
+  Iteration 4: 0 new nodes, 0 new edges, all visitors rejected (converged)
+  → CONVERGED → synthesize answer from session graph
 ```
 
-A well-known topic (heavy nodes, strong edges) converges in 1-2 iterations. A novel or complex question takes more loops. The system self-regulates — it doesn't have a fixed number of steps.
+A well-known topic (heavy visitor candidates, strong proposals) converges in 1-2 iterations. A novel or complex question takes more loops. The system self-regulates — it doesn't have a fixed number of steps.
 
 ## Human in the Loop
 
@@ -298,7 +328,7 @@ For bulk ingestion (books, codebases), the approval step can be batched or confi
 
 **Not a memory layer.** Memory systems (Mem0, Zep, LangMem) bolt a graph onto chat history. The chat history is still the primary context. The graph is supplementary. Composia replaces chat history entirely.
 
-**Not a RAG system.** RAG retrieves chunks and stuffs them into the context window alongside the conversation. There is no graph structure, no reinforcement, no consolidation, no convergence loop. Composia doesn't retrieve chunks — it assembles context by traversing a weighted, evolving graph.
+**Not a RAG system.** RAG retrieves chunks and stuffs them into the context window alongside the conversation. In Composia, the global graph does not supply answer content — it proposes visitors that the LLM evaluates. The session graph constructs the context. There is no "retrieve and stuff." There is "propose, evaluate, accept, construct."
 
 **Not a knowledge base you query separately.** Neo4j, Obsidian, and traditional knowledge graphs are databases you query from an application. Composia is in the LLM call path — it preprocesses every prompt and postprocesses every response. It's not a tool the LLM calls; it's the layer the LLM runs on.
 
@@ -309,17 +339,17 @@ For bulk ingestion (books, codebases), the approval step can be batched or confi
 | System | Context source | Graph role | Learning | Quality gate |
 |---|---|---|---|---|
 | Standard LLM | Chat history | None | None | None |
-| RAG | Chat history + retrieved chunks | None | None | None |
-| Mem0 / Zep | Chat history + graph memories | Supplementary | Entity extraction (one-shot) | None (silent) |
-| Graphiti | Chat history + temporal graph | Supplementary | Incremental entity extraction | None (silent) |
+| RAG | Chat history + retrieved chunks | Retrieval store (supplies content directly) | None | None |
+| Mem0 / Zep | Chat history + graph memories | Supplementary retrieval | Entity extraction (one-shot) | None (silent) |
+| Graphiti | Chat history + temporal graph | Supplementary retrieval | Incremental entity extraction | None (silent) |
 | Graph of Thoughts | Ephemeral per-query graph | Primary but ephemeral | None (rebuilt each time) | None |
-| **Composia** | **Graph only (no chat history)** | **Primary and persistent** | **Hebbian (reinforcement + consolidation)** | **Human approval** |
+| **Composia** | **Session graph (no chat history)** | **Global = learned prior (proposes visitors); Session = constructed context (produces answers)** | **Hebbian (reinforcement + consolidation)** | **Human approval** |
 
-The row that matters: Composia is the only system where the graph is both the primary context source AND persistent AND learns through reinforcement AND has human oversight.
+The row that matters: Composia is the only system where the graph is split into prior (global) and context (session), where the global graph proposes rather than retrieves, where the system learns through reinforcement, and where a human approves every mutation.
 
 ## The Core Mechanism in One Sentence
 
-Every input is decomposed into graph nodes and edges; repeated nodes consolidate into abstractions while preserving all edges; repeated edges get reinforced; the system converges toward truth because truth is reinforced and hallucinations are not.
+Every input is decomposed into graph nodes and edges; the global graph proposes visitors that the LLM evaluates for inclusion in the session graph; repeated nodes consolidate into abstractions while preserving all edges; repeated edges get reinforced; answers are synthesized only from the converged session graph; the system converges toward truth because truth is reinforced and hallucinations are not.
 
 ## Open Questions
 
