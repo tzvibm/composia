@@ -21,6 +21,18 @@ Return ONLY a JSON array of slug strings. Example: ["jwt-auth", "api-gateway"]
 If nothing is relevant, return: []"""
 
 
+EXTRACT_PROMPT = """Given a user's current question and a wiki page, extract ONLY the parts of this page that are relevant to answering the question. Do not include unrelated content even if it's on the same page.
+
+User's question: {user_message}
+
+Page: {page_title} ({page_slug})
+Full content:
+{page_content}
+
+Extract the relevant portions. Keep [[cross-references]] intact. If nothing on this page is relevant, respond with: NOTHING_RELEVANT
+Be concise — include only what helps answer the question."""
+
+
 CONNECTION_PROMPT = """Describe how these wiki pages connect to each other in plain English. Each connection should explain WHY the relationship matters, not just that it exists.
 
 Pages and their links:
@@ -78,6 +90,26 @@ class PromptBuilder:
                 pass
         return []
 
+    def _extract_relevant_content(self, page, user_message):
+        """Extract only the parts of a page relevant to this turn's question."""
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=2048,
+            messages=[{
+                "role": "user",
+                "content": EXTRACT_PROMPT.format(
+                    user_message=user_message,
+                    page_title=page.title,
+                    page_slug=page.slug,
+                    page_content=page.content
+                )
+            }]
+        )
+        text = response.content[0].text.strip()
+        if text == "NOTHING_RELEVANT":
+            return None
+        return text
+
     def _describe_connections(self, relevant_slugs):
         """Use LLM to describe connections between relevant pages in English."""
         if len(relevant_slugs) < 2:
@@ -128,12 +160,16 @@ class PromptBuilder:
             expanded = []
             for slug in relevant:
                 page = self.wiki.pages[slug]
-                expanded.append(f"### {page.title} ({slug})\n\n{page.content}")
+                # Extract only the parts relevant to this question
+                extracted = self._extract_relevant_content(page, user_message)
+                if extracted:
+                    expanded.append(f"### {page.title} ({slug})\n\n{extracted}")
 
-            sections.append(
-                "== RELEVANT CONTEXT (full detail) ==\n\n"
-                + "\n\n---\n\n".join(expanded)
-            )
+            if expanded:
+                sections.append(
+                    "== RELEVANT CONTEXT (extracted for this question) ==\n\n"
+                    + "\n\n---\n\n".join(expanded)
+                )
 
             # Section 3: Connections in English
             connections = self._describe_connections(relevant)
