@@ -46,28 +46,40 @@ Matches are recorded but nothing happens immediately. The system waits for signa
 
 ### Step 3: Consolidation Trigger
 When a node accumulates N matches (e.g., 5) across sessions:
-- The system collects all matched nodes and their edges
-- Asks the LLM to synthesize them into one canonical node
-- Merges edges, weighting by frequency
+- The system collects all matched nodes
+- Asks the LLM to synthesize their content into one canonical node
+- **All edges from all matched nodes are preserved** — they now point to/from the consolidated node
+- Edge weights are simply how many times that edge appeared across the duplicates
+- The consolidated node is an abstraction that gains connections from every duplicate
 - Presents the proposed consolidation to the user for approval
 
-### Step 4: Promotion
-The consolidated node lives in the global graph with reinforced edges. It surfaces automatically in future sessions when related topics come up.
+Consolidation merges the node. Edges stay intact. The node gets denser.
 
-### Step 5: Decay
+### Step 4: Edge Reinforcement (independent of consolidation)
+Edges get reinforced simply by repetition. If `[[payments]] → [[idempotency]]` appears across 15 sessions, that edge has weight 15 — regardless of whether the payment node itself consolidated. Heavier edges surface more readily during context assembly.
+
+Node consolidation and edge reinforcement are two independent processes, both driven by repetition alone. No rules, no special logic, just counting.
+
+### Step 5: Promotion
+The consolidated node lives in the global graph with all its accumulated edges. It surfaces automatically in future sessions when related topics come up. More edges = more connected = more likely to be traversed.
+
+### Step 6: Decay
 Nodes and edges that are never reinforced gradually lose weight. They stop surfacing in context assembly. Eventually they can be archived or pruned.
 
 ```
-Session 1: "auth uses jwt" → node created, no matches yet
-Session 3: "jwt for api auth" → vector match logged (1)
-Session 5: "authentication via jwt tokens" → match logged (2)
-Session 8: "we use jwt because sessions don't work with gateway" → match logged (3)
-Session 11: "jwt chosen over sessions for api-gateway compat" → match logged (4)
-Session 14: "jwt auth" → match logged (5) → CONSOLIDATION TRIGGERED
-  → LLM synthesizes: "JWT authentication chosen over session cookies
-     due to API gateway compatibility. Stateless, RS256 signed."
-  → Edges to [api-gateway], [session-cookies], [stateless-auth] consolidated
-  → User approves → canonical node promoted with heavy edges
+Session 1:  "auth uses jwt"           → node-A, edge: A→[[api-gateway]]
+Session 3:  "jwt for api auth"        → node-B, edges: B→[[api-gateway]], B→[[tokens]]
+Session 5:  "authentication via jwt"  → match logged (2)
+Session 8:  "jwt because no sessions" → node-D, edges: D→[[api-gateway]], D→[[session-cookies]]
+Session 11: "jwt over sessions"       → match logged (4)
+Session 14: "jwt auth"                → match logged (5) → CONSOLIDATION TRIGGERED
+
+Result: one canonical node-A' with ALL edges preserved:
+  A' → [[api-gateway]]      weight: 3 (appeared in A, B, D)
+  A' → [[tokens]]           weight: 1 (appeared in B)
+  A' → [[session-cookies]]  weight: 1 (appeared in D)
+
+The node consolidated. The edges stayed. The node got denser.
 ```
 
 ## The Context Loop
@@ -131,15 +143,13 @@ Links to: [[api-gateway]], [[session-cookies]], [[key-rotation]]
 
 ## Edge Structure
 
-Edges are weighted and can carry logic:
+Edges are simple. Their weight is their repetition count.
 
-- **Unconditional** — always traverse: `[[target]]`
-- **Conditional** — traverse if LLM evaluates condition as true: `[[target | if status=blocked]]`
-- **Weighted** — heavier edges are more likely to be included in context assembly
-- **Directional** — forward links (calls) and backlinks (returns) carry different semantics
+- **Weight** — how many times this edge has appeared across sessions. Heavier = surfaces more.
+- **Directional** — forward links (calls: "go get this context") and backlinks (returns: "here's what I contribute back")
+- **Conditional** — some edges may only be relevant in certain contexts, evaluated by LLM at traversal time
 
-Forward links = "go get this context" (like a function call)
-Backlinks = "here's what I contribute back" (like a return value)
+No special edge logic. Edges get reinforced by appearing repeatedly across sessions. That's it.
 
 ## What Composia Is NOT
 
