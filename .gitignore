@@ -4,4 +4,4 @@ node_modules/
 coverage/
 .composia/
 .composia-*/
-.filebench/
+.filebench/.composia/wiki/

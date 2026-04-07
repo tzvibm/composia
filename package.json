@@ -18,11 +18,19 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
     "classic-level": "^2.0.0",
     "commander": "^13.0.0"
   },
   "devDependencies": {
     "vitest": "^2.1.0"
   },
-  "keywords": ["knowledge-graph", "embedded-database", "ai-agent", "mcp", "obsidian-alternative", "rocksdb"]
+  "keywords": [
+    "knowledge-graph",
+    "embedded-database",
+    "ai-agent",
+    "mcp",
+    "obsidian-alternative",
+    "rocksdb"
+  ]
 }
