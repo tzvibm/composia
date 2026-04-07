@@ -1,120 +1,77 @@
-# CLAUDE.md
+# Composia: Context Engine MVP
 
-## Project Overview
+## What This Is
 
-Composia is an embedded graph-backed knowledge base for AI agents. It stores notes and relationships in RocksDB, providing instant graph traversal at scale — the "SQLite of knowledge graphs."
+A proof of concept that replaces chat history with wiki-constructed context.
 
-Agents and developers use it to build persistent, traversable project memory that grows with every session. Markdown files in `.composia/kb/` are the source of truth (committed to git). RocksDB indexes are built locally — like `node_modules` from `package.json`.
+Every existing LLM system uses chat history as context — an append-only log where hallucinations compound, irrelevant turns waste tokens, and nothing is learned across sessions. Composia tests a different approach: the LLM's context is assembled from a structured wiki that grows with each turn.
 
-## Commands
+## The Core Loop
+
+```
+User sends message
+    ↓
+1. DECOMPOSE: Haiku extracts knowledge from user input → updates wiki pages
+    ↓
+2. BUILD CONTEXT: Haiku selects relevant pages, extracts relevant portions,
+   describes connections in English → assembles into a structured prompt
+    ↓
+3. REASON: Sonnet receives wiki-assembled prompt (NOT chat history) +
+   user message as a fresh API call → produces response
+    ↓
+4. DECOMPOSE: Haiku extracts knowledge from response → updates wiki pages
+    ↓
+Next turn (wiki is richer, context is better)
+```
+
+Each turn is a **fresh API call with zero chat history**. The wiki is the only context. It grows and improves with every turn.
+
+## How the Prompt Is Built
+
+The wiki is NOT dumped as raw text. It is assembled into a structured prompt:
+
+1. **All nodes as one-line summaries** — full wiki awareness, lightweight
+2. **Relevant nodes selected** — Haiku picks which pages matter for this turn
+3. **Relevant portions extracted** — only the parts of each page that matter for THIS question (not full page dumps)
+4. **Connections described in English** — "jwt-auth connects to api-gateway because tokens are validated at the gateway before routing"
+
+This gives the reasoning LLM: broad awareness (summaries), focused depth (extracts), and steering (connections).
+
+## Why This Might Work Better Than Chat History
+
+- **Hallucinations don't compound** — each turn's context is built fresh from verified wiki pages, not from an ever-growing log that carries forward errors
+- **Corrections stick** — when the user corrects something, the wiki page is updated; future turns see the corrected version, not the original mistake buried 50 turns back
+- **Context is focused** — only relevant wiki content is included, not every turn that ever happened
+- **Knowledge accumulates** — the wiki grows richer over time; turn 100 has better context than turn 1
+
+## Files
+
+```
+mvp/
+├── agent.py            # The loop: decompose → build → reason → decompose
+├── wiki.py             # Page/Wiki classes, markdown read/write, [[link]] extraction
+├── prompt_builder.py   # Assembles wiki into structured context prompt
+├── wiki_updater.py     # Decomposes text into wiki page creates/updates
+├── bench.py            # Custom quick tests (fact retention, corrections, cross-refs)
+├── bench_locomo.py     # LoCoMo benchmark (industry standard, used by Mem0/Zep)
+└── bench_longmemeval.py # LongMemEval benchmark (ICLR 2025)
+```
+
+## Running
 
 ```bash
-npm test               # Run all tests (Vitest)
-npm run test:watch     # Run tests in watch mode
+# Interactive conversation
+cd mvp && python3 agent.py
 
-# Setup & Sync
-composia init                              # Set up Composia in a project
-composia build                             # Build RocksDB from kb/ files (run after git pull)
-composia sync                              # Write MCP/hook-created notes back to kb/
-
-# Knowledge
-composia remember "chose RocksDB because [[embedded]] #architecture"
-composia recall "What did we decide about auth?"  # LLM-powered query
-composia context <note-id>
-
-# Notes
-composia note add <id> -t "Title" -c "Content with [[links]]"
-composia note get <id>
-composia note list
-composia note rm <id>
-
-# Graph
-composia link from <id>
-composia link to <id>
-composia link graph <id> --depth 2
-
-# Search & Query
-composia search <query>
-composia tag <tag>
-composia query <field> <value>             # Indexed property query
-composia field <field>                     # Show all values for a field
-
-# Rules & Triggers
-composia rules add "When changing auth, update security audit"
-composia rules list
-composia trigger add <id> --field status --op eq --value blocked --action tag --tag needs-attention
-
-# Temporal
-composia history <id>                      # Version history
-composia changes --since <timestamp>       # Recent activity
-composia snapshot <label>                  # Save context before compaction
-
-# Stats
-composia stats
+# Industry benchmarks (need datasets cloned locally)
+python3 bench_locomo.py      # LoCoMo: compare against Mem0 (66.9%), OpenAI (52.9%)
+python3 bench_longmemeval.py # LongMemEval: compare against GPT-4o (~45%)
 ```
 
-## Architecture
+Requires: `pip install anthropic` and `ANTHROPIC_API_KEY` set.
 
-**Stack:** Node.js + RocksDB (classic-level) — pure JavaScript, zero native build step.
+## What We Are Testing
 
-```
-CLI (commander)     →  Knowledge Service  →  Engine  →  RocksDB (classic-level)
-MCP Server (mcp.js)    knowledge.js          engine.js   ├── notes sublevel
-Hooks (hooks.js)       parser.js             sync.js     ├── links sublevel
-                                                         ├── backlinks sublevel
-                                                         ├── tags sublevel
-                                                         ├── propidx sublevel
-                                                         ├── history sublevel
-                                                         └── triggers sublevel
-```
+The hypothesis: **structured wiki context outperforms append-only chat history** on factual consistency, information retention, and correction handling — measured by industry-standard benchmarks (LoCoMo, LongMemEval) using their official evaluation methodology.
 
-### Core Files
-
-- **`src/engine.js`** — RocksDB wrapper: notes, links, backlinks, tags, property indexes, history, triggers
-- **`src/parser.js`** — Parses `[[wikilinks]]`, `#tags`, YAML frontmatter, templates
-- **`src/knowledge.js`** — High-level service: CRUD, link/tag sync, property queries, temporal, triggers
-- **`src/sync.js`** — Bidirectional sync: kb/ markdown ↔ RocksDB
-- **`src/cli.js`** — CLI interface (commander)
-- **`src/resolve.js`** — LLM-powered query resolution (natural language → multi-step graph queries → synthesized answer)
-- **`src/summarizer.js`** — Two-layer summaries: deterministic (instant) + LLM-generated (semantic)
-- **`src/schema.js`** — Property schema enforcement, alias normalization
-- **`src/mcp.js`** — MCP server exposing 15 tools for Claude Code integration
-- **`src/hooks.js`** — Session hooks: auto-capture (post) + auto-traverse (pre) + rules
-- **`src/init.js`** — Project setup: creates `.composia/` structure
-
-### Key Concepts
-
-**Notes**: `{ id, title, content, tags[], properties{}, created, updated }` in the notes sublevel.
-
-**Links**: `[[target-id]]` in content auto-syncs to links/backlinks sublevels on every save.
-
-**Properties**: YAML frontmatter parsed and stored. Indexed in propidx sublevel for instant queries.
-
-**History**: Every save creates a versioned snapshot in the history sublevel. Time-travel queries.
-
-**Triggers**: Rules that fire when property conditions are met (auto-tag, auto-link, log).
-
-**Rules**: Plain English directives stored as notes tagged #rules. Surfaced to Claude via hooks.
-
-### Team Workflow (git-native)
-
-```
-.composia/kb/          ← IN GIT (markdown files, diffable, small)
-.composia/db/          ← GITIGNORED (RocksDB, rebuilt locally)
-```
-
-1. Developer writes notes in `kb/` or uses `composia remember`
-2. `git commit && git push`
-3. Teammate: `git pull && composia build`
-4. After MCP/hook writes: `composia sync` to write back to `kb/`
-
-### Database
-
-RocksDB via `classic-level`, stored in `.composia/db/` (gitignored):
-- `notes` — note payloads with properties
-- `links` — forward links (source:target → context)
-- `backlinks` — reverse links (target:source)
-- `tags` — tag index (tag:noteId)
-- `propidx` — property index (field:value:noteId)
-- `history` — temporal snapshots (noteId:timestamp → snapshot)
-- `triggers` — reactive rules (triggerId → config)
+If it does, the next step is adding a persistent global graph with Hebbian reinforcement (repeated concepts get consolidated, repeated connections get weighted). But first, prove the basic premise works.
