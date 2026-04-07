@@ -5,3 +5,4 @@ coverage/
 .composia/
 .composia-*/
 .filebench/.composia/wiki/
+mvp/__pycache__/
