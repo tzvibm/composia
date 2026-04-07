@@ -34,9 +34,11 @@ A node is also a piece of **context-steering data**. It exists to influence the 
 
 ### Visitors
 
-A **visitor** is a node from the global graph that is proposed as a candidate for evaluation during a query. The global graph does not inject visitors into the session graph directly — it proposes them. The LLM evaluates each visitor's summary and decides whether to accept it. Accepted visitors have their content loaded and decomposed into the session graph, where they influence the constructed context. Rejected visitors are ignored.
+A **visitor** is a node from the global graph that is proposed as a candidate for evaluation during a query. The global graph does not inject visitors into the session graph directly — it proposes them. The LLM evaluates each visitor's summary and decides whether to accept it. Accepted visitors have their content loaded and decomposed into nodes and edges within the session graph — they are not inserted as raw text. They influence the constructed context through structured decomposition, the same way any other input is processed. Rejected visitors are ignored.
 
 The term "visitor" is used throughout this document to distinguish proposed candidates from nodes that are already part of the session graph.
+
+In practice, most proposed visitors are rejected. The system is selective by design.
 
 ```markdown
 ---
@@ -72,9 +74,9 @@ An edge is a connection between two nodes. It has two properties that matter: di
 
 **Forward links** are like function calls. They say: "this node references that node." When a node is proposed as a visitor, its forward links identify other nodes that may also be proposed — but none are automatically included. The LLM evaluates each one.
 
-**Backlinks** are like return statements. They carry context back to the caller. When the session graph includes node B because of its relationship to node A, B's backlink to A carries B's relevant content back up the traversal path, enriching A's context within the session graph.
+**Backlinks** signal historical influence. They indicate that node B has historically influenced node A. When B is accepted into the session graph, its relationship to A may influence how A is interpreted — but only through LLM evaluation, not automatic propagation. Backlinks are candidates for context influence, not guaranteed flows.
 
-**Weight** is purely repetition count. If the edge `auth → jwt` has appeared in 22 sessions, its weight is 22. Higher weight means the edge is more likely to be proposed as a candidate connection during context assembly. But weight does not guarantee inclusion — the LLM evaluates whether to accept the proposal. No rules, no automatic traversal. Just counting how many times the connection appeared.
+**Weight** is purely repetition count. If the edge `auth → jwt` has appeared in 22 sessions, its weight is 22. Higher weight increases the likelihood that the connection is proposed as a candidate during context assembly. But weight does not guarantee inclusion — the LLM evaluates whether to accept the proposal. No rules, no automatic traversal. Just counting how many times the connection appeared.
 
 **Edges do not imply relevance.** An edge only encodes co-occurrence — that two concepts appeared together repeatedly. It does not mean "this is relevant to the current answer." The LLM decides relevance. The edge only says "these concepts have been connected before, consider whether they should be connected now."
 
@@ -100,7 +102,7 @@ The session graph is ephemeral. It does not persist after the session ends. Its 
 
 Persistent across all sessions. The global graph is a **learned prior** — it encodes what concepts exist, how they've been connected historically, and how strongly those connections have been reinforced. It does not produce answers. It biases which concepts the session graph considers.
 
-At session start, the global graph is available for the system to draw visitors from. The LLM knows what nodes exist, their summaries, their edge weights. It does not receive the full content of every node — it receives the graph structure and summaries, then proposes specific nodes as visitors to the session graph based on relevance to the current input.
+At session start, the global graph is available for the system to draw visitors from. The system proposes candidate nodes as visitors based on vector similarity and graph structure; the LLM evaluates them. It does not receive the full content of every node — it receives the graph structure and summaries, then the system proposes specific nodes as visitors to the session graph based on similarity to the current input.
 
 The global graph grows denser over time. Nodes that represent the same concept across multiple sessions get consolidated into single, canonical nodes. Edges that appear repeatedly get heavier. Nodes and edges that are never reinforced decay and eventually get pruned.
 
@@ -146,7 +148,7 @@ All edges preserved. Node is denser.
 
 ### 4. Edge Reinforcement
 
-Independent of consolidation. Every time an edge appears in a session, its weight in the global graph increments by 1. If `payments → idempotency` appears in 15 sessions, that edge has weight 15. Heavier edges are more likely to be proposed as candidate connections during context assembly — but the LLM evaluates each one.
+Independent of consolidation. Every time an edge appears in a session, its weight in the global graph increments by 1. If `payments → idempotency` appears in 15 sessions, that edge has weight 15. Higher weight increases the likelihood that the connection is proposed during context assembly — but the LLM evaluates each one.
 
 ### 5. Decay
 
@@ -209,6 +211,8 @@ These are two distinct operations:
 
 The global graph steers context. The session graph generates answers. They do not overlap.
 
+**The global graph influences what the system considers; the session graph determines what the system ultimately uses.**
+
 ## The Query Loop: Convergence-Based Answering
 
 When a user asks a question, the system does not produce an immediate answer. It iterates until the session graph converges — until new iterations reinforce existing edges instead of discovering new ones.
@@ -245,7 +249,7 @@ High-weight visitors are proposed first, but weight does not guarantee acceptanc
 
 **3. LLM evaluates which visitors to accept**
 
-The LLM receives the visitor summaries and the current session graph. It decides which visitors are relevant to the current question. This is not automatic traversal — it is LLM-mediated selection.
+The LLM receives the visitor summaries and the current session graph. It decides which visitors are useful for the current reasoning. This is not automatic traversal — it is LLM-mediated selection.
 
 ```
 LLM evaluation:
@@ -288,7 +292,7 @@ The loop continues:
 
 **10. Detect convergence**
 
-The system monitors whether new iterations are producing new nodes/edges in the session graph or just reinforcing existing ones. When the session graph stabilizes — new visitors are rejected because the session graph already contains equivalent knowledge — the system has converged.
+The system monitors whether new iterations are producing new nodes/edges in the session graph or just reinforcing existing ones. When the session graph stabilizes — new visitors are rejected because the session graph already contains equivalent knowledge — the system has converged. Convergence occurs when proposed visitors no longer introduce new structure into the session graph.
 
 Convergence = confidence. The answer is ready.
 
