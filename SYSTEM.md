@@ -12,6 +12,14 @@ The global graph is not a retrieval store. It does not supply answer content. It
 
 The pipeline between them is Hebbian: nodes that appear repeatedly get consolidated, edges that repeat get reinforced. Truth converges. Hallucinations decay.
 
+## The Key Thesis
+
+No existing system focuses on constructing context. Every approach — chain of thought, agent loops, RAG, memory layers — treats context as a given and tries to steer the LLM's reasoning within it. The context itself is unmanaged: chat history accumulates, retrieved chunks get stuffed in, and the LLM works with whatever it receives.
+
+Composia inverts this. The LLM itself constructs and maintains the context. It evaluates what enters the session graph. It decides which visitors to accept. It decomposes its own output into structured nodes. The context is not a passive input — it is an actively constructed artifact that the LLM builds, refines, and converges through the graph.
+
+Chain of thought steers reasoning. Agents steer tool use. RAG steers retrieval. **Composia steers context itself** — and uses the LLM as the engine that does the steering.
+
 ## Why Chat History Is Broken
 
 Chat history is an append-only log. It has no structural mechanism for truth.
