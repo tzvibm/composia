@@ -6,7 +6,7 @@ import { Knowledge } from './knowledge.js';
 import { readFileSync } from 'fs';
 import path from 'path';
 
-const DEFAULT_DB = process.env.COMPOSIA_DB || path.join(process.cwd(), '.composia');
+const DEFAULT_DB = process.env.COMPOSIA_DB || path.join(process.cwd(), '.composia', 'db');
 
 async function withKnowledge(opts, fn) {
   const engine = await createEngine(opts.db || DEFAULT_DB);
@@ -52,6 +52,40 @@ program
   .description('Graph-backed knowledge base for agents')
   .version('2.0.0')
   .option('--db <path>', 'database path', DEFAULT_DB);
+
+// ── Config ──────────────────────────────────────────────
+
+const config = program.command('config').description('Manage Composia configuration');
+
+config
+  .command('set <key> <value>')
+  .description('Set a config value (stored in .composia/config.json)')
+  .action(async (key, value) => {
+    const { saveConfig } = await import('./summarizer.js');
+    saveConfig({ [key]: value });
+    console.log(`Set ${key} = ${key.includes('key') ? value.slice(0, 8) + '...' : value}`);
+  });
+
+config
+  .command('get [key]')
+  .description('Show config values')
+  .action(async (key) => {
+    const { loadConfig } = await import('./summarizer.js');
+    const cfg = loadConfig();
+    if (key) {
+      const val = cfg[key];
+      if (val) {
+        console.log(key.includes('key') ? val.slice(0, 8) + '...' + ' (hidden)' : val);
+      } else {
+        console.log(`Not set. Use: composia config set ${key} <value>`);
+      }
+    } else {
+      for (const [k, v] of Object.entries(cfg)) {
+        console.log(`  ${k} = ${k.includes('key') ? String(v).slice(0, 8) + '...' : v}`);
+      }
+      if (Object.keys(cfg).length === 0) console.log('No config set. Try: composia config set api_key <your-anthropic-key>');
+    }
+  });
 
 // ── Note commands ────────────────────────────────────────
 
@@ -296,22 +330,65 @@ program
   });
 
 program
-  .command('recall <query...>')
-  .description('Search the knowledge graph — uses LLM reasoning when available, falls back to keyword search')
+  .command('ask <query...>')
+  .alias('recall')
+  .description('Ask a question — traverses the graph with semantic + keyword + graph search')
+  .option('--no-trace', 'hide reasoning trace')
   .action(async (queryParts, opts, cmd) => {
     const globalOpts = cmd.parent.opts();
     const query = queryParts.join(' ');
+    const showTrace = opts.trace !== false;
+
+    // Try viewer API first (avoids DB lock conflict)
+    try {
+      const viewerRes = await fetch(`http://localhost:3333/api/recall?q=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(2000) });
+      if (viewerRes.ok) {
+        const result = await viewerRes.json();
+        if (result.answer) {
+          if (showTrace && result.trace) {
+            for (const step of result.trace) console.log(`\x1b[2m• ${step.message}\x1b[0m`);
+            console.log('');
+          }
+          console.log(`\x1b[1m${result.answer}\x1b[0m`);
+          if (result.notes?.length) console.log(`\n\x1b[2mBased on ${result.notes.length} nodes\x1b[0m`);
+          return;
+        }
+      }
+    } catch { /* viewer not running, use direct DB access */ }
+
     await withKnowledge(globalOpts, async (kb) => {
-      // Try LLM-powered resolution first
       const { createResolver } = await import('./resolve.js');
       const resolver = createResolver(kb);
 
       if (resolver) {
-        const result = await resolver.resolve(query);
+        const dim = '\x1b[2m';
+        const cyan = '\x1b[36m';
+        const yellow = '\x1b[33m';
+        const green = '\x1b[32m';
+        const reset = '\x1b[0m';
+        const bold = '\x1b[1m';
+
+        const result = await resolver.resolve(query, {
+          onTrace: showTrace ? (step) => {
+            const icon = { context: '🔍', strategy: '🧠', execute: '⚡', drill: '🔬', synthesize: '📝', done: '✅' }[step.phase] || '•';
+            console.log(`${dim}${icon} ${step.message}${reset}`);
+            if (step.strategies) {
+              for (const s of step.strategies) console.log(`${dim}   → ${cyan}${s}${reset}`);
+            }
+            if (step.found?.length) {
+              console.log(`${dim}   found: ${yellow}${step.found.slice(0, 8).join(', ')}${step.found.length > 8 ? '...' : ''}${reset}`);
+            }
+            if (step.drillTargets) {
+              console.log(`${dim}   drilling: ${green}${step.drillTargets.join(', ')}${reset}`);
+            }
+          } : undefined,
+        });
+
         if (result.answer) {
-          console.log(result.answer);
+          if (showTrace) console.log('');
+          console.log(`${bold}${result.answer}${reset}`);
           if (result.notes?.length) {
-            console.log(`\nBased on: ${result.notes.map(n => n.id).join(', ')}`);
+            console.log(`\n${dim}Based on ${result.notes.length} nodes: ${result.notes.slice(0, 10).map(n => n.id).join(', ')}${reset}`);
           }
           return;
         }
@@ -601,6 +678,366 @@ program
     const { build } = await import('./sync.js');
     const result = await build(kbDir, dbPath);
     console.log(`Ingested: ${result.notes} notes, ${result.links} links`);
+  });
+
+// ── Map (codebase → self-navigating knowledge graph) ────
+
+program
+  .command('map <dir>')
+  .description('Map a codebase directory into a self-navigating knowledge graph')
+  .option('-p, --prefix <prefix>', 'ID prefix for map nodes', 'map')
+  .action(async (dir, opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    const { mapDirectory } = await import('./mapper.js');
+    await withKnowledge(globalOpts, async (kb) => {
+      console.log(`Mapping ${dir}...`);
+      const result = await mapDirectory(dir, kb, {
+        prefix: opts.prefix,
+        onProgress: (done, total, failed) => {
+          process.stdout.write(`\r  Summarizing: ${done}/${total} nodes${failed ? ` (${failed} failed)` : ''}`);
+        },
+      });
+      if (result.summarized > 0) process.stdout.write('\n');
+      console.log(`\nMapped: ${result.notes} nodes, ${result.links} links, ${result.constructs} constructs`);
+      if (result.summarized > 0) {
+        console.log(`Summarized: ${result.summarized} nodes (LLM)`);
+      } else {
+        console.log(`No API key — using deterministic summaries. For LLM: composia config set api_key <key>`);
+      }
+      if (result.indexed > 0) {
+        console.log(`Indexed: ${result.indexed} vectors (semantic search ready)`);
+      }
+      console.log(`\nRoot node: ${result.root}`);
+      console.log(`  composia view           # browse in browser`);
+      console.log(`  composia context ${result.root}`);
+    });
+  });
+
+// ── Embed (vector index) ────────────────────────────────
+
+program
+  .command('embed')
+  .description('Build vector index for semantic search')
+  .action(async (opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    const { VectorIndex } = await import('./vectors.js');
+    const engine = await createEngine(globalOpts.db || DEFAULT_DB);
+    const vecIndex = new VectorIndex(engine);
+    console.log('Building vector index...');
+    const result = await vecIndex.buildIndex();
+    console.log(`Indexed: ${result.indexed} notes, vocabulary: ${result.vocabSize} terms`);
+    await engine.close();
+  });
+
+// ── Semantic search ─────────────────────────────────────
+
+program
+  .command('semantic <query...>')
+  .description('Semantic search — find notes by meaning, not just keywords')
+  .option('-n, --limit <n>', 'max results', '10')
+  .action(async (queryParts, opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    const query = queryParts.join(' ');
+    const { VectorIndex } = await import('./vectors.js');
+    const engine = await createEngine(globalOpts.db || DEFAULT_DB);
+    const vecIndex = new VectorIndex(engine);
+    const results = await vecIndex.search(query, { limit: parseInt(opts.limit, 10) });
+    if (results.length === 0) {
+      console.log('No results. Run `composia embed` first to build the vector index.');
+    } else {
+      for (const r of results) {
+        console.log(`  ${r.score.toFixed(3)}  ${r.id}  "${r.title}"  ${r.tags?.map(t => '#' + t).join(' ') || ''}`);
+        if (r.summary) console.log(`         ${r.summary.slice(0, 120)}`);
+      }
+    }
+    await engine.close();
+  });
+
+// ── View (browser-based graph explorer) ─────────────────
+
+program
+  .command('view')
+  .description('Open an interactive graph browser in your web browser')
+  .option('-p, --port <port>', 'server port', '3333')
+  .option('--no-open', 'do not auto-open browser')
+  .action(async (opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    const dbPath = globalOpts.db || DEFAULT_DB;
+    const port = parseInt(opts.port, 10);
+    const { startViewer } = await import('./viewer.js');
+    const { server } = await startViewer(dbPath, { port });
+    if (opts.open !== false) {
+      const { exec } = await import('child_process');
+      const url = `http://localhost:${port}`;
+      const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+      exec(`${opener} ${url}`);
+    }
+    console.log('Press Ctrl+C to stop.');
+  });
+
+// ── Plan (prompt → execution graph) ────────────────────
+
+program
+  .command('plan <prompt...>')
+  .description('Build an execution plan from a natural language prompt')
+  .option('-n, --max-nodes <n>', 'max nodes in plan', '15')
+  .action(async (promptParts, opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    const prompt = promptParts.join(' ');
+    const { buildPlan } = await import('./prompt-mapper.js');
+    await withKnowledge(globalOpts, async (kb) => {
+      const result = await buildPlan(kb, prompt, { maxNodes: parseInt(opts.maxNodes, 10) });
+      console.log(`\nPlan: ${result.planId}`);
+      console.log(`Found ${result.summary.nodeCount} relevant nodes (${result.summary.lowConfidenceCount} low-confidence)\n`);
+      for (const node of result.summary.nodes) {
+        const conf = node.confidence < 0.5 ? ' [LOW]' : node.confidence < 0.8 ? ' [~]' : '';
+        console.log(`  ${node.confidence.toFixed(2)}${conf}  ${node.id}  "${node.title}"`);
+        if (node.summary) console.log(`         ${node.summary.slice(0, 120)}`);
+      }
+      if (result.lowConfidence.length > 0) {
+        console.log(`\nLow-confidence nodes need verification:`);
+        for (const lc of result.lowConfidence) {
+          console.log(`  - ${lc.id} (${lc.confidence.toFixed(2)})`);
+        }
+      }
+      console.log(`\n  composia context ${result.planId}  # view full plan`);
+    });
+  });
+
+// ── Mapper registry ────────────────────────────────────
+
+const mapper = program.command('mapper').description('Manage domain-specific mappers');
+
+mapper
+  .command('list')
+  .description('List installed mappers')
+  .action(async () => {
+    const { loadMappers } = await import('./registry.js');
+    const mappers = loadMappers();
+    if (mappers.length === 0) {
+      console.log('No mappers installed. Add .md files to .composia/mappers/');
+      return;
+    }
+    for (const m of mappers) {
+      console.log(`  ${m.domain.padEnd(12)} ${m.id.padEnd(25)} ${m.description || ''}`);
+      if (m.filePatterns.length) console.log(`             files: ${m.filePatterns.join(', ')}`);
+    }
+  });
+
+mapper
+  .command('install <source> [filename]')
+  .description('Install a mapper from a file path or raw content')
+  .action(async (source, filename) => {
+    const { installMapper } = await import('./registry.js');
+    const name = filename || path.basename(source);
+    const result = installMapper(process.cwd(), source, name);
+    console.log(`Installed mapper: ${result.installed}`);
+  });
+
+// ── Confidence ─────────────────────────────────────────
+
+program
+  .command('confidence <id>')
+  .description('Log a confidence change on a note')
+  .requiredOption('-d, --delta <delta>', 'Confidence change (-1 to 1)')
+  .requiredOption('-r, --reason <reason>', 'Why confidence changed')
+  .action(async (id, opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    await withKnowledge(globalOpts, async (kb) => {
+      const result = await kb.logConfidence(id, parseFloat(opts.delta), opts.reason);
+      console.log(`${id}: confidence ${result.confidence.toFixed(2)} (${result.delta > 0 ? '+' : ''}${result.delta})`);
+      if (result.triggered) console.log(`  ⚠ Below threshold — needs reevaluation`);
+    });
+  });
+
+// ── Chat (interactive session with persistent temp graph) ─
+
+program
+  .command('chat')
+  .description('Interactive session — each turn builds on the session graph')
+  .option('--no-trace', 'hide reasoning trace')
+  .option('--keep', 'keep session graph on exit (default: cleanup)')
+  .option('-p, --port <port>', 'viewer port (0 to disable)', '3333')
+  .option('--no-view', 'do not start the browser viewer')
+  .action(async (opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    const engine = await createEngine(globalOpts.db || DEFAULT_DB);
+    const kb = new Knowledge(engine);
+    const sessionId = `session-${Date.now()}`;
+
+    // Start viewer server (same process, same DB handle)
+    let viewerServer = null;
+    const port = parseInt(opts.port, 10);
+    if (port > 0 && opts.view !== false) {
+      try {
+        const { startViewer } = await import('./viewer.js');
+        const viewer = await startViewer(globalOpts.db || DEFAULT_DB, { port, _engine: engine });
+        viewerServer = viewer.server;
+        const viewUrl = `http://localhost:${port}`;
+        const { exec } = await import('child_process');
+        const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+        exec(`${opener} ${viewUrl}`);
+      } catch (e) {
+        // Port may be in use — not fatal
+      }
+    }
+
+    const dim = '\x1b[2m';
+    const cyan = '\x1b[36m';
+    const yellow = '\x1b[33m';
+    const green = '\x1b[32m';
+    const magenta = '\x1b[35m';
+    const reset = '\x1b[0m';
+    const bold = '\x1b[1m';
+
+    console.log(`${bold}Composia Chat${reset}  ${dim}session: ${sessionId}${reset}`);
+    if (viewerServer) console.log(`${dim}Viewer: http://localhost:${port} (Sessions tab updates live)${reset}`);
+    console.log(`${dim}Type your prompt. "graph" to see session graph. "exit" to quit.${reset}\n`);
+
+    const { createInterface } = await import('readline');
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+
+    const showTrace = opts.trace !== false;
+    let turnCount = 0;
+
+    const prompt = () => rl.question(`${cyan}> ${reset}`, async (input) => {
+      input = input.trim();
+      if (!input) return prompt();
+
+      // ── Commands ──
+      if (input === 'exit' || input === 'quit' || input === '.exit') {
+        if (!opts.keep) {
+          const result = await kb.cleanupTemp(sessionId);
+          if (result.deleted > 0) console.log(`${dim}Cleaned up ${result.deleted} session nodes.${reset}`);
+        } else {
+          console.log(`${dim}Session graph kept: tag session:${sessionId}${reset}`);
+        }
+        rl.close();
+        if (viewerServer) viewerServer.close();
+        await engine.close();
+        return;
+      }
+
+      if (input === 'graph') {
+        const tempIds = await engine.getNotesByTag(`session:${sessionId}`);
+        if (tempIds.length === 0) {
+          console.log(`${dim}No session nodes yet.${reset}\n`);
+          return prompt();
+        }
+
+        // Gather session graph state
+        const graphState = [];
+        for (const id of tempIds) {
+          try {
+            const note = await engine.getNote(id);
+            const { forward } = await kb.getLinks(id);
+            const targets = forward.map(l => l.target);
+            graphState.push({ id, title: note.title, prompt: note.properties?.prompt, links: targets });
+          } catch {}
+        }
+
+        // LLM summary of session graph
+        const { createResolver } = await import('./resolve.js');
+        const resolver = createResolver(kb);
+        if (resolver) {
+          const graphText = graphState.map(n =>
+            `- ${n.title}${n.prompt ? ` (prompt: "${n.prompt}")` : ''}\n  links to: ${n.links.slice(0, 10).join(', ') || 'none'}`
+          ).join('\n');
+          const summary = await resolver.llm(
+            `Summarize this session's exploration graph in 2-4 sentences. What has been explored, what areas have been covered, and what themes connect the nodes?\n\nSession nodes:\n${graphText}`
+          );
+          console.log(`\n${bold}Session Graph${reset} ${dim}(${tempIds.length} plans, ${graphState.reduce((s, n) => s + n.links.length, 0)} links)${reset}`);
+          console.log(`${summary}\n`);
+        } else {
+          // Fallback: compact dump if no API key
+          console.log(`\n${bold}Session Graph${reset} ${dim}(${tempIds.length} nodes)${reset}`);
+          for (const n of graphState) {
+            console.log(`  ${magenta}${n.title}${reset} ${dim}→ ${n.links.length} links${reset}`);
+          }
+          console.log('');
+        }
+        return prompt();
+      }
+
+      if (input === 'keep') {
+        const tempIds = await engine.getNotesByTag(`session:${sessionId}`);
+        for (const id of tempIds) {
+          await kb.promoteTemp(id);
+        }
+        console.log(`${green}Promoted ${tempIds.length} session nodes to permanent.${reset}\n`);
+        return prompt();
+      }
+
+      // ── Build plan (grows session graph) ──
+      turnCount++;
+      try {
+        const { buildPlan } = await import('./prompt-mapper.js');
+        const plan = await buildPlan(kb, input, { sessionId, maxNodes: 15 });
+        console.log(`${dim}Plan: ${plan.planId} — ${plan.summary.nodeCount} nodes${plan.summary.lowConfidenceCount ? ` (${plan.summary.lowConfidenceCount} low-confidence)` : ''}${reset}`);
+
+        // Show the plan nodes briefly
+        for (const node of plan.summary.nodes.slice(0, 8)) {
+          const conf = node.confidence < 0.5 ? ` ${yellow}[LOW]${reset}` : '';
+          console.log(`${dim}  ${node.confidence.toFixed(2)}${conf}  ${node.id}  "${node.title}"${reset}`);
+        }
+        if (plan.summary.nodes.length > 8) {
+          console.log(`${dim}  ... and ${plan.summary.nodes.length - 8} more${reset}`);
+        }
+
+        // ── Resolve (LLM traverses the graph) ──
+        const { createResolver } = await import('./resolve.js');
+        const resolver = createResolver(kb);
+
+        if (resolver) {
+          const result = await resolver.resolve(input, {
+            onTrace: showTrace ? (step) => {
+              const icon = { context: '~', strategy: '*', execute: '>', read: '#', synthesize: '+', done: '=' }[step.phase] || '.';
+              console.log(`${dim}${icon} ${step.message}${reset}`);
+              if (step.strategies) {
+                for (const s of step.strategies) console.log(`${dim}   -> ${cyan}${s}${reset}`);
+              }
+              if (step.found?.length) {
+                console.log(`${dim}   found: ${yellow}${step.found.slice(0, 8).join(', ')}${step.found.length > 8 ? '...' : ''}${reset}`);
+              }
+              if (step.drillTargets) {
+                console.log(`${dim}   reading: ${green}${step.drillTargets.join(', ')}${reset}`);
+              }
+            } : undefined,
+          });
+
+          if (result.answer) {
+            if (showTrace) console.log('');
+            console.log(`${bold}${result.answer}${reset}`);
+            if (result.notes?.length) {
+              console.log(`\n${dim}Based on ${result.notes.length} nodes${reset}`);
+            }
+          }
+        } else {
+          console.log(`\n${yellow}No API key configured. Run: composia config set api_key <key>${reset}`);
+          console.log(`${dim}Plan was still built — type "graph" to see session state.${reset}`);
+        }
+      } catch (e) {
+        console.log(`${yellow}Error: ${e.message}${reset}`);
+      }
+
+      console.log('');
+      prompt();
+    });
+
+    prompt();
+  });
+
+// ── Cleanup temp nodes ─────────────────────────────────
+
+program
+  .command('cleanup')
+  .description('Remove all temporary nodes (plans, execution artifacts)')
+  .action(async (opts, cmd) => {
+    const globalOpts = cmd.parent.opts();
+    await withKnowledge(globalOpts, async (kb) => {
+      const result = await kb.cleanupTemp();
+      console.log(`Cleaned up ${result.deleted} temporary nodes`);
+    });
   });
 
 program.parse();

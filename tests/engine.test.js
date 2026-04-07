@@ -88,7 +88,7 @@ describe('Engine', () => {
   it('creates and queries forward links', async () => {
     await engine.putLink('src', 'tgt', '[[tgt]]');
     const links = await engine.getForwardLinks('src');
-    expect(links).toEqual([{ target: 'tgt', context: '[[tgt]]' }]);
+    expect(links).toEqual([{ target: 'tgt', context: '[[tgt]]', confidence: 1 }]);
   });
 
   it('creates and queries backlinks', async () => {

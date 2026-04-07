@@ -124,6 +124,7 @@ export class Engine {
 
   async open() {
     this.db = new ClassicLevel(this.dbPath, { valueEncoding: 'json' });
+    await this.db.open();
     this.notes = this.db.sublevel('notes', { valueEncoding: 'json' });
     this.links = this.db.sublevel('links', { valueEncoding: 'json' });
     this.backlinks = this.db.sublevel('backlinks', { valueEncoding: 'json' });
@@ -152,11 +153,25 @@ export class Engine {
       summary: generateSummary(content, note.title || id),
       tags: note.tags || [],
       properties: note.properties || existing?.properties || {},
+      confidence: note.confidence ?? existing?.confidence ?? 1.0,
+      confidence_log: note.confidence_log ?? existing?.confidence_log ?? [],
       created: existing?.created || now,
       updated: now,
     };
     await this.notes.put(id, record);
     return record;
+  }
+
+  async logConfidence(noteId, delta, reason) {
+    const note = await this.getNote(noteId);
+    const log = note.confidence_log || [];
+    const oldConfidence = note.confidence ?? 1.0;
+    const newConfidence = Math.max(0, Math.min(1, oldConfidence + delta));
+    log.push({ delta, reason, date: new Date().toISOString(), from: oldConfidence, to: newConfidence });
+    note.confidence = newConfidence;
+    note.confidence_log = log;
+    await this.notes.put(noteId, note);
+    return { noteId, confidence: newConfidence, delta, triggered: newConfidence < 0.5 };
   }
 
   async getNote(id) {
@@ -198,10 +213,10 @@ export class Engine {
 
   // ── Links ──────────────────────────────────────────────
 
-  async putLink(sourceId, targetId, context = '') {
+  async putLink(sourceId, targetId, context = '', confidence = 1.0) {
     await this.db.batch([
-      { type: 'put', sublevel: this.links, key: `${sourceId}:${targetId}`, value: { context } },
-      { type: 'put', sublevel: this.backlinks, key: `${targetId}:${sourceId}`, value: {} },
+      { type: 'put', sublevel: this.links, key: `${sourceId}:${targetId}`, value: { context, confidence } },
+      { type: 'put', sublevel: this.backlinks, key: `${targetId}:${sourceId}`, value: { confidence } },
     ]);
   }
 

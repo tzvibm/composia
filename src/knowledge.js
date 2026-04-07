@@ -45,12 +45,14 @@ export class Knowledge {
     const fmTags = Array.isArray(properties.tags) ? properties.tags : [];
     const allTags = [...new Set([...(explicitTags || []), ...parsedTags, ...fmTags])];
 
-    // Save the note
+    // Save the note (preserve confidence if present)
     const note = await this.engine.putNote(noteId, {
       title: noteTitle,
       content,
       tags: allTags,
       properties,
+      confidence: existing?.confidence,
+      confidence_log: existing?.confidence_log,
     });
 
     // Save temporal snapshot
@@ -76,6 +78,11 @@ export class Knowledge {
       if (!currentTargets.has(link.target)) {
         await this.engine.putLink(noteId, link.target, link.raw);
       }
+      // Auto-create stub note for link targets that don't exist
+      const targetExists = await this.engine.getNote(link.target).catch(() => null);
+      if (!targetExists) {
+        await this._createStubNote(link.target, noteId, content);
+      }
     }
 
     // Evaluate triggers
@@ -84,12 +91,71 @@ export class Knowledge {
       await this._executeTriggerAction(trigger, noteId, note);
     }
 
-    // Generate LLM summary (async, non-blocking — deterministic summary is already stored)
+    // Generate LLM summary — only if not called from a short-lived context
+    // (the async fire-and-forget was causing "iterator not open" crashes
+    //  when withKnowledge closed the engine before the promise resolved)
+    if (this._summarizer && this._enhanceOnSave) {
+      await enhanceSummary(this.engine, noteId, this._summarizer).catch(() => {});
+    }
+
+    return note;
+  }
+
+  /**
+   * Create a stub note for a wikilink target that doesn't exist yet.
+   * Uses LLM to generate a title and description from the linking context.
+   */
+  async _createStubNote(targetId, sourceNoteId, sourceContent) {
+    // Build a human-readable title from the slug
+    const title = targetId.replace(/^file-/, '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+    let description = `Referenced by [[${sourceNoteId}]].`;
+    let intent = 'general';
+    let keywords = [];
+
+    // Fire-and-forget LLM enhancement — don't block the save
     if (this._summarizer) {
-      enhanceSummary(this.engine, noteId, this._summarizer).catch(() => {
-        // LLM summary failed — deterministic summary remains as fallback
+      const summarizer = this._summarizer;
+      const engine = this.engine;
+      const tid = targetId;
+      setImmediate(async () => {
+        try {
+          const context = (sourceContent || '').slice(0, 2000);
+          const llm = await summarizer(
+            `Stub node: ${tid}`,
+            `The node "${tid}" was referenced via [[${tid}]] in a note titled "${sourceNoteId}". ` +
+            `Based on the linking context below, describe what "${tid}" likely represents and why it matters.\n\n` +
+            `Linking context:\n${context}`
+          );
+          // Update the stub with the LLM-generated description
+          const current = await engine.getNote(tid).catch(() => null);
+          if (current && current.properties?.status === 'stub') {
+            const updatedContent = `---\nintent: ${llm.intent || intent}\nstatus: stub\n---\n\n${llm.body || description}`;
+            await engine.putNote(tid, {
+              ...current,
+              content: updatedContent,
+              properties: { ...current.properties, intent: llm.intent || 'general' },
+            });
+          }
+        } catch {
+          // LLM enhancement failed — stub remains with basic description
+        }
       });
     }
+
+    const tags = targetId.startsWith('file-') ? ['file', 'auto-stub'] : ['auto-stub'];
+    const content = `---\nintent: ${intent}\nstatus: stub\n---\n\n${description}`;
+
+    const note = await this.engine.putNote(targetId, {
+      title,
+      content,
+      tags,
+      properties: { intent, status: 'stub' },
+    });
+
+    await this.engine.syncTags(targetId, tags);
+    await this.engine.syncPropertyIndex(targetId, { intent, status: 'stub' }, {});
+    await this.engine.saveSnapshot(targetId, note);
 
     return note;
   }
@@ -473,5 +539,34 @@ export class Knowledge {
     const base = await this.engine.stats();
     const triggers = await this.engine.listTriggers();
     return { ...base, triggers: triggers.length };
+  }
+
+  // ── Confidence ──────────────────────────────────────────
+
+  async logConfidence(noteId, delta, reason) {
+    return this.engine.logConfidence(noteId, delta, reason);
+  }
+
+  // ── Temporary Nodes ─────────────────────────────────────
+
+  async cleanupTemp(sessionId) {
+    const tag = sessionId ? `session:${sessionId}` : 'temp';
+    const tempIds = await this.engine.getNotesByTag(tag);
+    for (const id of tempIds) {
+      await this.deleteNote(id);
+    }
+    return { deleted: tempIds.length, session: sessionId || 'all' };
+  }
+
+  async promoteTemp(noteId) {
+    const note = await this.engine.getNote(noteId);
+    const tags = (note.tags || []).filter(t => t !== 'temp' && !t.startsWith('session:'));
+    const props = { ...note.properties };
+    delete props.temp;
+    delete props.session;
+    await this.engine.putNote(noteId, { ...note, tags, properties: props });
+    await this.engine.syncTags(noteId, tags);
+    await this.engine.syncPropertyIndex(noteId, props, note.properties);
+    return { promoted: noteId };
   }
 }

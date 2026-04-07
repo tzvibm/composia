@@ -15,19 +15,32 @@
 import { createEngine } from './engine.js';
 import { Knowledge } from './knowledge.js';
 import { parseLinks, parseTags } from './parser.js';
+import { mapDirectory } from './mapper.js';
 import path from 'path';
 
 const DB_PATH = process.env.COMPOSIA_DB || path.join(process.cwd(), '.composia', 'db');
 
 // ── MCP Protocol over stdin/stdout ──────────────────────
 
-let kb = null;
-let engine = null;
 let requestId = 0;
 
+/**
+ * Open the database, run a callback, then close it.
+ * This ensures the RocksDB lock is only held during active requests,
+ * allowing the CLI and other processes to access the database between calls.
+ */
+async function withDb(fn) {
+  const engine = await createEngine(DB_PATH);
+  const kb = new Knowledge(engine);
+  try {
+    return await fn(kb, engine);
+  } finally {
+    await engine.close();
+  }
+}
+
 function send(msg) {
-  const json = JSON.stringify(msg);
-  process.stdout.write(`Content-Length: ${Buffer.byteLength(json)}\r\n\r\n${json}`);
+  process.stdout.write(JSON.stringify(msg) + '\n');
 }
 
 function sendResult(id, result) {
@@ -281,11 +294,57 @@ Setting a property auto-normalizes via schema aliases and fires matching trigger
       required: ['template'],
     },
   },
+  {
+    name: 'composia_map',
+    description: `Map a codebase directory into a self-navigating knowledge graph. Scans all source files, extracts constructs (classes, functions, interfaces, types, methods), and creates interlinked graph nodes at every level: project → directories → files → constructs → methods.
+
+Each node contains a summary, [[child]] links to traverse, navigation instructions, and a backlink to its parent. The graph IS the execution plan — an LLM reads the root node, follows links to drill into code, and backlinks carry context upward.
+
+Run this to populate the graph with a full codebase map. After mapping, use composia_graph on the root node to start exploring.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dir: { type: 'string', description: 'Directory to map (default: current working directory ".")' },
+        prefix: { type: 'string', description: 'ID prefix for map nodes (default: "map")' },
+      },
+    },
+  },
+  {
+    name: 'composia_plan',
+    description: `Build an execution plan from a natural language prompt. Searches the graph for relevant nodes, traverses their neighbors, and creates a temporary plan node with [[links]] to all relevant nodes in traverse order.
+
+Returns a summary showing: all matched nodes with confidence scores, low-confidence warnings, and the plan node ID. The plan node itself uses the standard traverse/return pattern — an LLM can follow it sequentially.
+
+Temporary plan nodes are cleaned up automatically or via composia_cleanup.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'Natural language prompt to build an execution plan for' },
+        maxNodes: { type: 'number', description: 'Maximum nodes to include in the plan (default: 15)' },
+      },
+      required: ['prompt'],
+    },
+  },
+  {
+    name: 'composia_confidence',
+    description: `Log a confidence change on a node. Use positive delta for supporting evidence, negative for contradicting evidence. All changes are logged with reasoning and timestamps.
+
+When confidence drops below 0.5, the node is flagged for reevaluation. The response includes the new confidence score and whether reevaluation was triggered.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Note ID to update confidence on' },
+        delta: { type: 'number', description: 'Confidence change (-1 to 1). Positive = supporting evidence, negative = contradiction.' },
+        reason: { type: 'string', description: 'Why confidence changed — what evidence was found' },
+      },
+      required: ['id', 'delta', 'reason'],
+    },
+  },
 ];
 
 // ── Tool Handlers ───────────────────────────────────────
 
-async function handleTool(name, args) {
+async function handleTool(kb, name, args) {
   switch (name) {
     case 'composia_save': {
       const note = await kb.saveNote({
@@ -376,6 +435,34 @@ async function handleTool(name, args) {
       return await resolver.resolve(args.query);
     }
 
+    case 'composia_map': {
+      const dir = args.dir || '.';
+      const result = await mapDirectory(dir, kb, {
+        prefix: args.prefix || 'map',
+        summarize: true,
+        onProgress: () => {},
+      });
+      return {
+        root: result.root,
+        notes: result.notes,
+        links: result.links,
+        constructs: result.constructs,
+        summarized: result.summarized || 0,
+        indexed: result.indexed || 0,
+        message: `Mapped ${result.notes} nodes, ${result.links} links, ${result.constructs} constructs. Root: ${result.root}`,
+      };
+    }
+
+    case 'composia_plan': {
+      const { buildPlan } = await import('./prompt-mapper.js');
+      const result = await buildPlan(kb, args.prompt, { maxNodes: args.maxNodes });
+      return result.summary;
+    }
+
+    case 'composia_confidence': {
+      return await kb.logConfidence(args.id, args.delta, args.reason);
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -395,9 +482,6 @@ async function handleMessage(msg) {
       });
 
     case 'notifications/initialized':
-      // Client confirmed init — open the DB
-      engine = await createEngine(DB_PATH);
-      kb = new Knowledge(engine);
       return;
 
     case 'tools/list':
@@ -406,9 +490,9 @@ async function handleMessage(msg) {
     case 'tools/call': {
       const { name, arguments: args } = params;
       try {
-        const result = await handleTool(name, args || {});
+        const result = await withDb(kb => handleTool(kb, name, args || {}));
         return sendResult(id, {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+          content: [{ type: 'text', text: JSON.stringify(result ?? null, null, 2) }],
         });
       } catch (err) {
         return sendResult(id, {
@@ -423,41 +507,26 @@ async function handleMessage(msg) {
   }
 }
 
-// ── stdin reader (Content-Length framing) ────────────────
+// ── stdin reader (newline-delimited JSON per MCP stdio spec) ──
 
-let buffer = '';
+import { createInterface } from 'readline';
 
-process.stdin.setEncoding('utf-8');
-process.stdin.on('data', (chunk) => {
-  buffer += chunk;
+const rl = createInterface({ input: process.stdin });
 
-  while (true) {
-    const headerEnd = buffer.indexOf('\r\n\r\n');
-    if (headerEnd === -1) break;
+rl.on('line', (line) => {
+  const trimmed = line.trim();
+  if (!trimmed) return;
 
-    const header = buffer.slice(0, headerEnd);
-    const match = header.match(/Content-Length:\s*(\d+)/i);
-    if (!match) { buffer = buffer.slice(headerEnd + 4); continue; }
-
-    const len = parseInt(match[1], 10);
-    const bodyStart = headerEnd + 4;
-    if (buffer.length < bodyStart + len) break; // Wait for more data
-
-    const body = buffer.slice(bodyStart, bodyStart + len);
-    buffer = buffer.slice(bodyStart + len);
-
-    try {
-      const msg = JSON.parse(body);
-      handleMessage(msg).catch(err => {
-        process.stderr.write(`MCP error: ${err.message}\n`);
-      });
-    } catch (err) {
-      process.stderr.write(`JSON parse error: ${err.message}\n`);
-    }
+  try {
+    const msg = JSON.parse(trimmed);
+    handleMessage(msg).catch(err => {
+      process.stderr.write(`MCP error: ${err.message}\n`);
+    });
+  } catch (err) {
+    process.stderr.write(`JSON parse error: ${err.message}\n`);
   }
 });
 
-process.stdin.on('end', async () => {
-  if (engine) await engine.close();
+rl.on('close', () => {
   process.exit(0);
 });

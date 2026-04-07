@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node src/hooks.js prompt-context",
+            "statusMessage": "Consulting Composia knowledge graph"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node src/hooks.js pre",
+            "statusMessage": "Checking Composia knowledge graph for context"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node src/hooks.js post",
+            "statusMessage": "Capturing session to Composia knowledge graph"
+          }
+        ]
+      }
+    ]
+  }
+}
