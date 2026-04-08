@@ -227,15 +227,93 @@ class ContextPipeline:
         self.graph.close()
 
 
+    def turn_verbose(self, user_input):
+        """Full pipeline with step-by-step output."""
+        self.graph.clear_layer("prompt")
+
+        print(f"\n  [Steps 1-3] Decomposing...")
+        nodes, edges = self.step_1_3_decompose(user_input, source="user")
+        if not nodes:
+            from .models import Node
+            nodes = [Node(id="user-query", layer="prompt", title=user_input[:60],
+                         content=user_input, summary=user_input, tags=["question"])]
+            edges = []
+
+        self.graph.batch_put_nodes(nodes)
+        self.graph.batch_put_edges(edges)
+        self.step_4_index(nodes)
+
+        print(f"  Prompt graph: {len(nodes)} nodes, {len(edges)} edges")
+        for n in nodes:
+            print(f"    @{n.id} [{', '.join(n.tags)}]: {n.summary[:70]}")
+        for e in edges[:5]:
+            print(f"    @{e.source_id} --{e.edge_type}--> @{e.target_id}")
+
+        print(f"\n  [Steps 5-7] RAG + traversal...")
+        similar = self.step_5_search(nodes)
+        tuples = self.step_6_build_tuples(nodes, similar)
+        if tuples:
+            print(f"  Found {len(tuples)} matches:")
+            for t in tuples[:5]:
+                print(f"    @{t.prompt_node.id} <-> @{t.session_node.id} (sim={t.similarity:.2f})")
+            tuples = self.step_7_traverse(tuples)
+        else:
+            print(f"  No similar session nodes found")
+
+        print(f"\n  [Steps 8-9] Resynthesis...")
+        changes = self.step_8_resynthesize(tuples, prompt_nodes=nodes)
+        print(f"\n  Proposed changes:")
+        print(f"    {changes.summary}")
+        if changes.resynthesize: print(f"    Resynthesize: {len(changes.resynthesize)} nodes")
+        if changes.correct: print(f"    Correct: {len(changes.correct)} nodes")
+        if changes.add_content: print(f"    Add content: {len(changes.add_content)} nodes")
+        if changes.delete: print(f"    Delete: {changes.delete}")
+        if changes.new_edges: print(f"    New edges: {len(changes.new_edges)}")
+        if changes.remove_edges: print(f"    Remove edges: {len(changes.remove_edges)}")
+        if changes.promote_nodes: print(f"    Promote: {len(changes.promote_nodes)} prompt → session")
+
+        try:
+            approval = input("  Approve? [Y/n]: ").strip().lower()
+        except EOFError:
+            approval = "y"
+        if approval == "n":
+            print("  Changes rejected.")
+            self.graph.clear_layer("prompt")
+            return "Changes rejected. Send another message to try again."
+        self.resynthesizer.apply_changes(changes, auto_approve=True)
+
+        similar_map = {}
+        for t in tuples:
+            pid = t.prompt_node.id
+            if pid not in similar_map:
+                similar_map[pid] = []
+            similar_map[pid].append((t.session_node.id, t.similarity))
+
+        print(f"\n  [Steps 10-12] Rendering + reasoning...")
+        system_prompt = self.template.render_full(similar_map)
+        print(f"  System prompt: {len(system_prompt)} chars")
+
+        response = self.step_12_send(system_prompt, user_input)
+
+        print(f"\n  [Step 13] Processing response...")
+        self.step_13_process_response(response)
+        self.graph.clear_layer("prompt")
+
+        stats = self.stats()
+        print(f"  Graph: {stats['session_nodes']} session nodes, {stats['total_edges']} edges")
+
+        return response
+
+
 def main():
-    """Interactive REPL."""
+    """Interactive REPL with verbose pipeline output."""
     import sys
     db_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DB_PATH
 
-    pipeline = ContextPipeline(db_path=db_path)
+    pipeline = ContextPipeline(db_path=db_path, auto_approve=True)
     print(f"Composia Context Engine v2")
     print(f"DB: {db_path} | {pipeline.stats()}")
-    print(f"Commands: quit, stats, graph")
+    print(f"Commands: quit, stats, graph, dump")
     print()
 
     while True:
@@ -253,12 +331,22 @@ def main():
             print(pipeline.stats())
             continue
         if user_input == "graph":
-            nodes = pipeline.graph.list_nodes(limit=20)
+            nodes = pipeline.graph.list_nodes(limit=30)
             for n in nodes:
-                print(f"  @{n.id} [{n.layer}] [{', '.join(n.tags)}]: {n.summary}")
+                edges_out = pipeline.graph.get_forward_edges(n.id)
+                edge_str = " -> " + ", ".join(f"@{e.target_id}" for e in edges_out[:3]) if edges_out else ""
+                print(f"  @{n.id} [{n.layer}] [{', '.join(n.tags[:3])}] w={n.weight:.1f}: {n.summary[:50]}{edge_str}")
+            continue
+        if user_input == "dump":
+            system_prompt = pipeline.template.render_full()
+            print(f"\n--- SYSTEM PROMPT ({len(system_prompt)} chars) ---")
+            print(system_prompt[:3000])
+            if len(system_prompt) > 3000:
+                print(f"\n... ({len(system_prompt) - 3000} more chars)")
+            print("--- END ---\n")
             continue
 
-        response = pipeline.turn(user_input)
+        response = pipeline.turn_verbose(user_input)
         print(f"\nAssistant: {response}\n")
 
     pipeline.close()
