@@ -1,77 +1,74 @@
-# Composia: Context Engine MVP
+# Composia: Context Engine v2
 
 ## What This Is
 
-A proof of concept that replaces chat history with wiki-constructed context.
+A 13-step graph pipeline that replaces chat history with graph-constructed context. Every input is decomposed into atomic semantic elements (nodes), connected by typed weighted edges, stored with vector embeddings for RAG retrieval, and resynthesized through a confidence-based traversal loop.
 
-Every existing LLM system uses chat history as context — an append-only log where hallucinations compound, irrelevant turns waste tokens, and nothing is learned across sessions. Composia tests a different approach: the LLM's context is assembled from a structured wiki that grows with each turn.
+## Architecture
 
-## The Core Loop
-
-```
-User sends message
-    ↓
-1. DECOMPOSE: Haiku extracts knowledge from user input → updates wiki pages
-    ↓
-2. BUILD CONTEXT: Haiku selects relevant pages, extracts relevant portions,
-   describes connections in English → assembles into a structured prompt
-    ↓
-3. REASON: Sonnet receives wiki-assembled prompt (NOT chat history) +
-   user message as a fresh API call → produces response
-    ↓
-4. DECOMPOSE: Haiku extracts knowledge from response → updates wiki pages
-    ↓
-Next turn (wiki is richer, context is better)
-```
-
-Each turn is a **fresh API call with zero chat history**. The wiki is the only context. It grows and improves with every turn.
-
-## How the Prompt Is Built
-
-The wiki is NOT dumped as raw text. It is assembled into a structured prompt:
-
-1. **All nodes as one-line summaries** — full wiki awareness, lightweight
-2. **Relevant nodes selected** — Haiku picks which pages matter for this turn
-3. **Relevant portions extracted** — only the parts of each page that matter for THIS question (not full page dumps)
-4. **Connections described in English** — "jwt-auth connects to api-gateway because tokens are validated at the gateway before routing"
-
-This gives the reasoning LLM: broad awareness (summaries), focused depth (extracts), and steering (connections).
-
-## Why This Might Work Better Than Chat History
-
-- **Hallucinations don't compound** — each turn's context is built fresh from verified wiki pages, not from an ever-growing log that carries forward errors
-- **Corrections stick** — when the user corrects something, the wiki page is updated; future turns see the corrected version, not the original mistake buried 50 turns back
-- **Context is focused** — only relevant wiki content is included, not every turn that ever happened
-- **Knowledge accumulates** — the wiki grows richer over time; turn 100 has better context than turn 1
-
-## Files
+Pure Python + SQLite. One database for graph storage and vector embeddings.
 
 ```
-mvp/
-├── agent.py            # The loop: decompose → build → reason → decompose
-├── wiki.py             # Page/Wiki classes, markdown read/write, [[link]] extraction
-├── prompt_builder.py   # Assembles wiki into structured context prompt
-├── wiki_updater.py     # Decomposes text into wiki page creates/updates
-├── bench.py            # Custom quick tests (fact retention, corrections, cross-refs)
-├── bench_locomo.py     # LoCoMo benchmark (industry standard, used by Mem0/Zep)
-└── bench_longmemeval.py # LongMemEval benchmark (ICLR 2025)
+context_engine/
+├── models.py          # Node, Edge, TraversalTuple, ChangeSet
+├── config.py          # Thresholds, model names, decay params
+├── llm_client.py      # Anthropic API wrapper
+├── graph_store.py     # SQLite graph: nodes, edges, tags, history
+├── vector_store.py    # FastEmbed + numpy cosine similarity
+├── decomposer.py      # Steps 1-3: text → nodes → edges
+├── retriever.py       # Steps 4-7: RAG + confidence traversal
+├── resynthesizer.py   # Steps 8-9: graph mutations + approval
+├── prompt_template.py # Steps 10-11: deterministic rendering
+├── pipeline.py        # Steps 1-13: orchestrator + REPL
+└── bench_adapter.py   # Benchmark integration
 ```
+
+## The 13-Step Pipeline
+
+```
+User input
+  ↓
+1. LLM decomposes into nodes (no edges)
+2. LLM generates typed edges between nodes
+3. Store as prompt graph + embed in vector store
+  ↓
+4. Index prompt nodes for RAG
+5. Find similar session nodes via vector search
+6. Build (prompt, session) tuples with edges + similarity scores
+7. Confidence traversal: LLM decides if more context needed, follows edges
+  ↓
+8. LLM proposes graph mutations (resynthesize, correct, delete, new edges, etc.)
+9. Show summary → user approves → apply changes
+  ↓
+10. Render session graph (deterministic template)
+11. Render prompt graph (deterministic template)
+12. Stateless LLM call with graph-constructed prompt
+13. Decompose response → repeat from step 1
+```
+
+## Three Graph Layers
+
+- **prompt**: Current turn's decomposed input. Cleared after each turn.
+- **session**: Accumulated session context. Grows with each turn.
+- **system**: Long-term cross-session memory (future).
 
 ## Running
 
 ```bash
-# Interactive conversation
-cd mvp && python3 agent.py
+pip install anthropic fastembed numpy python-dotenv
 
-# Industry benchmarks (need datasets cloned locally)
-python3 bench_locomo.py      # LoCoMo: compare against Mem0 (66.9%), OpenAI (52.9%)
-python3 bench_longmemeval.py # LongMemEval: compare against GPT-4o (~45%)
+# Interactive REPL
+python -m context_engine.pipeline
+
+# Set API key
+export ANTHROPIC_API_KEY=your-key
+# Or use .env file
 ```
 
-Requires: `pip install anthropic` and `ANTHROPIC_API_KEY` set.
+## Dependencies
 
-## What We Are Testing
-
-The hypothesis: **structured wiki context outperforms append-only chat history** on factual consistency, information retention, and correction handling — measured by industry-standard benchmarks (LoCoMo, LongMemEval) using their official evaluation methodology.
-
-If it does, the next step is adding a persistent global graph with Hebbian reinforcement (repeated concepts get consolidated, repeated connections get weighted). But first, prove the basic premise works.
+- anthropic (LLM API)
+- fastembed (local embeddings, BAAI/bge-small-en-v1.5)
+- numpy (vector similarity)
+- python-dotenv (env loading)
+- sqlite3 (stdlib, graph + vector storage)
