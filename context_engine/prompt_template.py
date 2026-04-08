@@ -100,24 +100,10 @@ class PromptTemplate:
 
         parts = []
         parts.append(
-            "You are an assistant. Your knowledge comes ONLY from the graph below.\n\n"
-            "GRAPH FORMAT:\n"
-            "- @id = unique node identifier\n"
-            "- [tags] = semantic type (fact, event, feeling, decision, question, plan, preference, etc.)\n"
-            "- w = weight (higher = more referenced/important)\n"
-            "- c = confidence (higher = more recent/reliable, decays over time)\n"
-            "- \u2192 @target (w=N) = outgoing edge to another node with weight\n"
-            "- \u2190 @source (w=N) = incoming edge from another node\n"
-            "- Edge types: answers, causes, constrains, contradicts, corrects, supports, "
-            "part_of, located_in, temporal_sequence, spatial_sequence, describes, informs\n"
-            "- SIMILAR: @id (score) = prompt node matched to session node by semantic similarity\n\n"
-            "SESSION CONTEXT = accumulated knowledge from this conversation.\n"
-            "CURRENT INPUT = the user's latest message, decomposed into semantic elements.\n\n"
-            "RULES:\n"
-            "- Respond using ONLY graph knowledge. Do NOT ask clarifying questions.\n"
-            "- Do NOT offer generic suggestions or lists. Be specific from graph content.\n"
-            "- Follow edges to find connected context. Higher weight edges = stronger connections.\n"
-            "- If the graph lacks information needed to answer, say exactly what is missing."
+            "You are a helpful assistant. Below is everything you know about this conversation. "
+            "Respond naturally and directly. Do NOT mention the graph, nodes, edges, or how your knowledge is structured. "
+            "Do NOT ask clarifying questions. Do NOT offer generic lists of options. "
+            "Be specific based on what you know. If you lack information to answer, say what's missing."
         )
         if session:
             parts.append(session)
