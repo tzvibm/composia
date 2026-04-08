@@ -71,3 +71,4 @@ class ChangeSet:
     remove_edges: list = field(default_factory=list)      # [(source_id, target_id)]
     promote_nodes: list = field(default_factory=list)     # [node_id] prompt -> session
     summary: str = ""
+    properties: dict = field(default_factory=dict)       # metadata (e.g. completeness scores)

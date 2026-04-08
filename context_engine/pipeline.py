@@ -134,15 +134,10 @@ class ContextPipeline:
             max_iter=self.max_traversal,
         )
 
-    def step_8_resynthesize(self, tuples, prompt_nodes=None):
-        if tuples:
-            return self.resynthesizer.propose_changes(tuples)
-        # No similar nodes found — promote all prompt nodes
-        prompt_ids = [n.id for n in (prompt_nodes or [])]
-        from .models import ChangeSet
-        return ChangeSet(
-            promote_nodes=prompt_ids,
-            summary="No existing knowledge. All new input added to session.",
+    def step_8_resynthesize(self, tuples, prompt_nodes=None, interactive=False):
+        return self.resynthesizer.propose_changes(
+            tuples, prompt_nodes=prompt_nodes,
+            interactive=interactive,
         )
 
     def step_9_approve(self, changes):
@@ -267,8 +262,8 @@ class ContextPipeline:
         else:
             print(f"  No similar session nodes found")
 
-        print(f"\n  [Steps 8-9] Resynthesis...")
-        changes = self.step_8_resynthesize(tuples, prompt_nodes=nodes)
+        print(f"\n  [Steps 8-9] Resynthesis + 5W1H evaluation...")
+        changes = self.step_8_resynthesize(tuples, prompt_nodes=nodes, interactive=True)
         print(f"\n  Proposed changes:")
         print(f"    {changes.summary}")
         if changes.resynthesize: print(f"    Resynthesize: {len(changes.resynthesize)} nodes")
