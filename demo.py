@@ -81,8 +81,36 @@ def main():
         auto_approve=True,
     )
 
-    for i, prompt in enumerate(DEMO_PROMPTS):
-        print_header(f"TURN {i+1}/{len(DEMO_PROMPTS)}", "─")
+    turn = 0
+    prompt_idx = 0
+    while True:
+        turn += 1
+
+        # Suggest next prompt or let user type freely
+        if prompt_idx < len(DEMO_PROMPTS):
+            suggested = DEMO_PROMPTS[prompt_idx]
+            prompt_idx += 1
+            print_header(f"TURN {turn}", "─")
+            print(f"\n  Suggested: {suggested}")
+            print(f"\n  Press ENTER to use suggested, type your own, or 'quit' to exit:")
+            try:
+                user_input = input("  > ").strip()
+            except (EOFError, KeyboardInterrupt):
+                break
+            if user_input.lower() == "quit":
+                break
+            prompt = user_input if user_input else suggested
+        else:
+            print_header(f"TURN {turn} (free input)", "─")
+            print(f"\n  No more suggestions. Type your message or 'quit':")
+            try:
+                user_input = input("  > ").strip()
+            except (EOFError, KeyboardInterrupt):
+                break
+            if not user_input or user_input.lower() == "quit":
+                break
+            prompt = user_input
+
         print(f"\n  User: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
 
         start = time.time()
