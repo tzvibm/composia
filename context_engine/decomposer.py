@@ -51,6 +51,41 @@ RULES:
 - Return ONLY valid JSON array."""
 
 
+RESPONSE_NODES_PROMPT = """Extract ONLY substantive knowledge from this assistant response. IGNORE filler.
+
+DO NOT extract:
+- Greetings, pleasantries ("I'd be happy to help!", "Great question!")
+- Meta-commentary ("Here's what I think:", "Based on the context:")
+- Hedging ("I believe", "It seems like", "Perhaps")
+- Restatements of what the user already said
+- Transitional phrases ("Let me explain", "To summarize")
+- Offers to help ("Let me know if you need anything else")
+
+DO extract:
+- New facts, recommendations, or suggestions the assistant provided
+- Specific answers to questions (with exact values/names)
+- Decisions or conclusions reached
+- Action items or next steps proposed
+- Corrections to prior information
+
+Text to extract from (assistant response):
+{text}
+
+Return JSON array of nodes (ONLY substantive knowledge, often 0-3 nodes):
+[
+  {{
+    "id": "specific-slug-name",
+    "title": "Short descriptive title",
+    "tags": ["recommendation", "fact", "answer", "action-item"],
+    "summary": "One sentence with specific details",
+    "content": "Full content preserving exact wording"
+  }}
+]
+
+If the response is pure filler with no substantive knowledge, return: []
+Return ONLY valid JSON array."""
+
+
 EDGES_PROMPT = """Given these nodes, generate directed edges between them.
 
 Nodes:
@@ -83,13 +118,17 @@ class Decomposer:
         self.llm = llm or LLMClient(model=BUILD_MODEL)
 
     def decompose_to_nodes(self, text, source="user"):
-        """Step 1: Break text into nodes WITHOUT edges."""
+        """Step 1: Break text into nodes WITHOUT edges.
+        Uses stricter prompt for assistant responses to filter filler."""
         if not text.strip():
             return []
 
-        result = self.llm.call_json(
-            NODES_PROMPT.format(text=text, source=source)
-        )
+        if source == "assistant":
+            prompt = RESPONSE_NODES_PROMPT.format(text=text)
+        else:
+            prompt = NODES_PROMPT.format(text=text, source=source)
+
+        result = self.llm.call_json(prompt)
 
         if isinstance(result, dict) and "nodes" in result:
             result = result["nodes"]
