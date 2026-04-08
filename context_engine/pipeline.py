@@ -324,15 +324,49 @@ class ContextPipeline:
         stats = self.stats()
         print(f"  Graph: {stats['session_nodes']} session nodes, {stats['total_edges']} edges")
 
-        # Show 5W1H gaps (info only, doesn't block pipeline)
+        # Show context size
+        system_prompt_tokens = len(system_prompt) // 4  # rough estimate
+        print(f"  Context size: ~{system_prompt_tokens:,} tokens ({len(system_prompt):,} chars)")
+
+        # Show 5W1H gaps — only critical questions (confidence >= 0.8)
         completeness = changes.properties.get("completeness", [])
-        incomplete = [c for c in completeness if c.get("score", 1.0) < 0.7 and c.get("missing")]
-        if incomplete:
-            print(f"\n  5W1H gaps (unanswered questions):")
-            for c in incomplete:
-                print(f"    @{c['node_id']} ({c.get('score', 0):.0%} complete)")
-                for q in c.get("missing", []):
-                    print(f"      ? {q}")
+        critical_questions = []
+        for c in completeness:
+            for q in c.get("missing", []):
+                if isinstance(q, dict) and q.get("confidence", 0) >= 0.8:
+                    critical_questions.append((c.get("node_id", "?"), q))
+                elif isinstance(q, str):
+                    # Legacy format without confidence — skip low-value
+                    pass
+
+        if critical_questions:
+            print(f"\n  Critical unanswered questions:")
+            for node_id, q in critical_questions:
+                qtext = q["question"] if isinstance(q, dict) else q
+                conf = q.get("confidence", "?") if isinstance(q, dict) else "?"
+                print(f"    @{node_id}: {qtext} (confidence: {conf})")
+
+            # Add top questions to graph as question nodes
+            for node_id, q in critical_questions[:3]:  # max 3
+                qtext = q["question"] if isinstance(q, dict) else q
+                dim = q.get("dimension", "unknown") if isinstance(q, dict) else "unknown"
+                q_node = Node(
+                    id=f"5w1h-{node_id}-{dim}",
+                    layer="session",
+                    title=f"Unanswered: {qtext[:50]}",
+                    content=qtext,
+                    summary=qtext,
+                    tags=["question", "5w1h", dim],
+                )
+                self.graph.put_node(q_node)
+                # Link question to the node it's about
+                from .models import Edge as EdgeModel
+                self.graph.put_edge(EdgeModel(
+                    source_id=f"5w1h-{node_id}-{dim}",
+                    target_id=node_id,
+                    edge_type="questions",
+                    context=f"5W1H gap: {dim}",
+                ))
 
         return response
 

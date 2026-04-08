@@ -24,7 +24,9 @@ For each pair, decide what to do:
 - **promote**: New prompt nodes that should become session knowledge
 
 Also evaluate each NEW node for 5W1H completeness (Who, What, Where, When, Why, How).
-Include a "completeness" section showing which dimensions are missing.
+Only flag questions that are CRITICALLY important for understanding the node in context.
+Do NOT flag trivial gaps (e.g. don't ask "Where is this interaction?" for a greeting).
+Assign a confidence score (0.0-1.0) to each question — only include questions with confidence >= 0.8.
 
 Return JSON:
 {{
@@ -37,7 +39,7 @@ Return JSON:
   "remove_edges": [["source-id", "target-id"]],
   "promote_nodes": ["prompt-node-id-to-keep"],
   "completeness": [
-    {{"node_id": "id", "score": 0.0-1.0, "missing": ["When is this happening?", "Why was this decided?"]}}
+    {{"node_id": "id", "score": 0.0-1.0, "missing": [{{"question": "When is the trip?", "confidence": 0.9, "dimension": "when"}}]}}
   ],
   "summary": "Human-readable summary of all changes in 2-3 sentences"
 }}

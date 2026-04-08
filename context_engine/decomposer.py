@@ -94,8 +94,11 @@ Nodes:
 Return a JSON array of edges. Each edge has:
 - source_id: the node this edge comes FROM
 - target_id: the node this edge goes TO
-- edge_type: one of [causes, relates_to, contradicts, temporal_sequence, part_of, describes, corrects, supports]
+- edge_type: one of [causes, relates_to, contradicts, temporal_sequence, spatial_sequence, part_of, describes, corrects, supports, located_in, contains]
 - context: brief explanation of why this edge exists
+
+Use spatial_sequence for geographic/physical relationships (e.g. city→country, room→building).
+Use located_in for "X is in Y". Use contains for "X contains Y".
 
 [
   {{

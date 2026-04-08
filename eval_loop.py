@@ -300,7 +300,13 @@ class EvalLoop:
 
             self.history.append(("assistant", response))
 
+            # Measure context size
+            system_prompt = self.pipeline.template.render_full()
+            context_chars = len(system_prompt)
+            context_tokens_est = context_chars // 4
+
             print(f"Nodes: {len(nodes)} | Edges: {len(edges)} | Similar: {sim_count} | Resp nodes: {len(resp_nodes)}")
+            print(f"Context: ~{context_tokens_est:,} tokens ({context_chars:,} chars)")
             print(f"Changes: {changes.summary[:80]}")
             print(f"Response: {response[:120]}...")
             print(f"Time: {elapsed:.1f}s")
@@ -327,6 +333,9 @@ class EvalLoop:
                 "nodes_created": len(nodes),
                 "edges_created": len(edges),
                 "similar_found": sim_count,
+                "response_nodes": len(resp_nodes),
+                "context_chars": context_chars,
+                "context_tokens_est": context_tokens_est,
                 "changes_summary": changes.summary,
                 "response": response[:500],
                 "critique": critique,
@@ -348,6 +357,24 @@ class EvalLoop:
         if scores:
             print(f"Average score: {sum(scores)/len(scores):.1f}/5")
             print(f"Min: {min(scores)}/5 | Max: {max(scores)}/5")
+
+        # Context growth
+        contexts = [r.get("context_tokens_est", 0) for r in self.results]
+        if contexts:
+            print(f"\nContext growth:")
+            print(f"  Start: ~{contexts[0]:,} tokens")
+            print(f"  End:   ~{contexts[-1]:,} tokens")
+            print(f"  Growth: ~{contexts[-1] - contexts[0]:,} tokens over {len(contexts)} cycles")
+
+        # Timing
+        times = [r.get("elapsed", 0) for r in self.results]
+        if times:
+            print(f"\nTiming:")
+            print(f"  Avg: {sum(times)/len(times):.1f}s | Total: {sum(times):.0f}s")
+
+        # Token estimate (rough: ~4 LLM calls per cycle, ~2k tokens each)
+        est_tokens = len(self.results) * 4 * 2000 + sum(contexts)
+        print(f"\nEstimated total tokens: ~{est_tokens:,}")
 
         # Per-dimension averages
         dims = ["decomposition_quality", "edge_quality", "retrieval_quality",
