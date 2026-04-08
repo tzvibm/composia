@@ -99,12 +99,8 @@ class PromptTemplate:
         prompt = self.render_prompt(similar_map)
 
         parts = []
-        parts.append(
-            "You are a helpful assistant. Below is everything you know about this conversation. "
-            "Respond naturally and directly. Do NOT mention the graph, nodes, edges, or how your knowledge is structured. "
-            "Do NOT ask clarifying questions. Do NOT offer generic lists of options. "
-            "Be specific based on what you know. If you lack information to answer, say what's missing."
-        )
+        # No system preamble — the graph sections ARE the context.
+        # Only add minimal instruction if there's actual content.
         if session:
             parts.append(session)
         if prompt:
