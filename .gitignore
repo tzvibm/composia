@@ -6,3 +6,6 @@ coverage/
 .composia-*/
 .filebench/.composia/wiki/
 mvp/__pycache__/
+.eval-*/
+__pycache__/
+context_engine/__pycache__/
