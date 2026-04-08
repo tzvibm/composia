@@ -56,7 +56,17 @@ class ContextPipeline:
         # Steps 1-3: Decompose input into prompt graph
         nodes, edges = self.step_1_3_decompose(user_input, source="user")
         if not nodes:
-            return "I couldn't extract any meaningful content from your input."
+            # Fallback: treat entire input as a single question node
+            from .models import Node
+            nodes = [Node(
+                id="user-query",
+                layer="prompt",
+                title=user_input[:60],
+                content=user_input,
+                summary=user_input,
+                tags=["question"],
+            )]
+            edges = []
 
         # Store in graph and vector index
         self.graph.batch_put_nodes(nodes)
@@ -118,7 +128,7 @@ class ContextPipeline:
         return self.retriever.traverse_with_confidence(
             tuples,
             threshold=self.confidence_threshold,
-            max_iterations=self.max_traversal,
+            max_iter=self.max_traversal,
         )
 
     def step_8_resynthesize(self, tuples, prompt_nodes=None):
