@@ -68,7 +68,7 @@ User message: {user_message}
 
 Step 1-3 (Decomposition):
   Nodes created: {nodes}
-  Edges created: {edges}
+  Edges created (within this turn): {edges}
 
 Step 5-7 (Retrieval):
   Similar nodes found: {similar_count}
@@ -81,26 +81,39 @@ Step 8 (Resynthesis):
 Step 12 (Response):
   LLM response: {response}
 
-Graph after turn:
+Response nodes added to graph: {response_nodes}
+
+Full graph edges (ALL connections in session graph):
+{all_edges}
+
+Graph nodes after turn:
   {graph_state}
 
 Rate these aspects (1-5):
-1. **decomposition_quality**: Did it break the message into correct atomic elements? Were entities properly separated (e.g., country vs city)? Were dates, numbers preserved?
-2. **edge_quality**: Are edges meaningful and correctly typed? Are obvious connections missing?
-3. **retrieval_quality**: Did RAG find the right context? Were irrelevant nodes retrieved?
-4. **resynthesis_quality**: Were graph changes appropriate? Were corrections, merges, new edges proposed correctly?
+1. **decomposition_quality**: Did it break the message into correct atomic elements? Were entities properly separated (e.g., country vs city as separate nodes)? Were dates, numbers preserved exactly?
+2. **edge_quality**: Rate the FULL edge graph:
+   - Are within-turn edges correctly typed (causes, temporal_sequence, describes, etc.)?
+   - Are cross-turn edges present where they should be? (e.g., assistant recommendation → user question that prompted it)
+   - Are response nodes correctly connected to the user prompt nodes they answer?
+   - Are there missing edges between related nodes from different turns?
+   - Are there spurious edges connecting unrelated nodes?
+   - Do edge weights make sense (frequently co-occurring concepts should have higher weights)?
+3. **retrieval_quality**: Did RAG find the right context? Were irrelevant nodes retrieved? Were relevant nodes missed?
+4. **resynthesis_quality**: Were graph changes appropriate? Were corrections, merges, new edges proposed correctly? Were filler response nodes correctly filtered out?
 5. **response_quality**: Was the LLM response informed by the graph context? Was it accurate and helpful?
 6. **completeness_quality**: Were 5W1H gaps correctly identified?
 
 Return JSON:
 {{
   "decomposition_quality": {{"score": N, "issues": ["..."]}},
-  "edge_quality": {{"score": N, "issues": ["..."]}},
+  "edge_quality": {{"score": N, "issues": ["specific edge problems like: '@user-location should connect to @trip-plan but doesn't'", "edge @A->@B is spurious, these nodes are unrelated"]}},
   "retrieval_quality": {{"score": N, "issues": ["..."]}},
   "resynthesis_quality": {{"score": N, "issues": ["..."]}},
   "response_quality": {{"score": N, "issues": ["..."]}},
   "completeness_quality": {{"score": N, "issues": ["..."]}},
   "overall_score": N,
+  "missing_edges": [["source-node-id", "target-node-id", "why this edge should exist"]],
+  "spurious_edges": [["source-node-id", "target-node-id", "why this edge shouldn't exist"]],
   "critical_issues": ["most important problems to fix"],
   "suggested_fixes": ["specific actionable improvements"]
 }}"""
@@ -153,7 +166,8 @@ class EvalLoop:
         return prompt.strip().strip('"')
 
     def critique_turn(self, user_msg, nodes, edges, similar_count,
-                      top_matches, changes, response, completeness):
+                      top_matches, changes, response, completeness,
+                      response_nodes=None):
         """Critique every step of the pipeline for this turn."""
         nodes_str = "\n".join(
             f"  @{n.id} [{', '.join(n.tags)}]: {n.summary[:80]}"
@@ -165,13 +179,28 @@ class EvalLoop:
             for e in edges
         ) or "  (none)"
 
-        graph_nodes = self.pipeline.graph.list_nodes(layer="session", limit=20)
+        # Response nodes
+        resp_str = "\n".join(
+            f"  @{n.id} [{', '.join(n.tags)}]: {n.summary[:80]}"
+            for n in (response_nodes or [])
+        ) or "  (none — filtered as filler)"
+
+        # Full edge graph
+        all_edges_rows = self.pipeline.graph.conn.execute(
+            "SELECT source_id, target_id, weight, edge_type FROM edges ORDER BY weight DESC LIMIT 30"
+        ).fetchall()
+        all_edges_str = "\n".join(
+            f"  @{src} --{etype}--> @{tgt} (w={w:.0f})"
+            for src, tgt, w, etype in all_edges_rows
+        ) or "  (no edges)"
+
+        graph_nodes = self.pipeline.graph.list_nodes(layer="session", limit=25)
         graph_state = "\n".join(
             f"  @{n.id} [{', '.join(n.tags[:2])}] w={n.weight:.1f}: {n.summary[:50]}"
             for n in graph_nodes
         )
 
-        completeness_str = json.dumps(completeness, indent=2) if completeness else "none"
+        completeness_str = json.dumps(completeness, indent=2)[:500] if completeness else "none"
 
         try:
             critique = self.critic.call_json(
@@ -184,9 +213,11 @@ class EvalLoop:
                     changes_summary=changes.summary,
                     completeness=completeness_str,
                     response=response[:400],
+                    response_nodes=resp_str,
+                    all_edges=all_edges_str,
                     graph_state=graph_state,
                 ),
-                max_tokens=1000,
+                max_tokens=1500,
             )
             return critique
         except Exception as e:
@@ -242,7 +273,7 @@ class EvalLoop:
             self.pipeline.approve_response_graph(resp_nodes)
         self.pipeline.graph.clear_layer("prompt")
 
-        return nodes, edges, len(similar), top_matches, changes, response, completeness
+        return nodes, edges, len(similar), top_matches, changes, response, completeness, resp_nodes or []
 
     def run(self):
         """Run the full eval loop."""
@@ -263,13 +294,13 @@ class EvalLoop:
             print(f"User: {user_msg[:100]}{'...' if len(user_msg) > 100 else ''}")
 
             start = time.time()
-            nodes, edges, sim_count, top_matches, changes, response, completeness = \
+            nodes, edges, sim_count, top_matches, changes, response, completeness, resp_nodes = \
                 self.run_turn(user_msg)
             elapsed = time.time() - start
 
             self.history.append(("assistant", response))
 
-            print(f"Nodes: {len(nodes)} | Edges: {len(edges)} | Similar: {sim_count}")
+            print(f"Nodes: {len(nodes)} | Edges: {len(edges)} | Similar: {sim_count} | Resp nodes: {len(resp_nodes)}")
             print(f"Changes: {changes.summary[:80]}")
             print(f"Response: {response[:120]}...")
             print(f"Time: {elapsed:.1f}s")
@@ -278,7 +309,7 @@ class EvalLoop:
             print(f"Critiquing...")
             critique = self.critique_turn(
                 user_msg, nodes, edges, sim_count, top_matches,
-                changes, response, completeness,
+                changes, response, completeness, resp_nodes,
             )
 
             overall = critique.get("overall_score", 0)
@@ -341,6 +372,24 @@ class EvalLoop:
             print(f"\nTop issues (by frequency):")
             for issue, count in top:
                 print(f"  [{count}x] {issue}")
+
+        # Aggregate edge issues
+        missing_edges = []
+        spurious_edges = []
+        for r in self.results:
+            c = r.get("critique", {})
+            missing_edges.extend(c.get("missing_edges", []))
+            spurious_edges.extend(c.get("spurious_edges", []))
+        if missing_edges:
+            print(f"\nMissing edges ({len(missing_edges)} total):")
+            for me in missing_edges[:10]:
+                if len(me) >= 3:
+                    print(f"  @{me[0]} -> @{me[1]}: {me[2]}")
+        if spurious_edges:
+            print(f"\nSpurious edges ({len(spurious_edges)} total):")
+            for se in spurious_edges[:10]:
+                if len(se) >= 3:
+                    print(f"  @{se[0]} -> @{se[1]}: {se[2]}")
 
         # Aggregate suggested fixes
         all_fixes = []
