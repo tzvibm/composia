@@ -27,4 +27,5 @@ MAX_TRAVERSAL_ITERATIONS = 3
 
 # Graph
 MAX_GRAPH_DEPTH = 5
-DEFAULT_DB_PATH = ".composia/context.db"
+# Use /var/tmp to avoid iCloud Drive sync conflicts with SQLite
+DEFAULT_DB_PATH = "/var/tmp/composia/context.db"

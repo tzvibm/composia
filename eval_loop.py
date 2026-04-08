@@ -122,7 +122,8 @@ Return JSON:
 class EvalLoop:
     def __init__(self, scenario="travel", db_path=None, cycles=20, verbose=False):
         self.scenario = SCENARIOS.get(scenario, SCENARIOS["travel"])
-        self.db_path = db_path or os.path.join(os.path.dirname(__file__), f".eval-{scenario}", "context.db")
+        # Use /var/tmp (persists across reboots, not cleaned like /tmp, not iCloud-synced)
+        self.db_path = db_path or f"/var/tmp/composia-eval-{scenario}/context.db"
         self.cycles = cycles
         self.verbose = verbose
         self.history = []  # (role, message) pairs
