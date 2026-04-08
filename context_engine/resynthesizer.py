@@ -50,6 +50,7 @@ RULES:
 - When a state changes (mood, preference, decision), create a CHANGE node (tag: "change") recording from/to, don't just overwrite
 - If a change has no stated cause, include "UNKNOWN CAUSE" in the summary
 - Always promote prompt nodes that contain new information
+- IMPORTANT: Look at the FULL SESSION GRAPH and propose edges between new nodes and ANY existing session nodes they logically relate to, even if they weren't found by similarity search. For example, if a user says "I want to have fun" and the session has a "trip to Nicaragua" node, create an edge connecting them.
 - Return ONLY valid JSON"""
 
 
@@ -71,9 +72,22 @@ class Resynthesizer:
                         f"NEW @{pn.id} [{', '.join(pn.tags)}]:\n"
                         f"  Summary: {pn.summary}\n"
                         f"  Content: {pn.content[:300]}\n"
-                        f"EXISTING: (no match found)\n"
+                        f"EXISTING: (no direct match found via similarity)\n"
                         f"  Similarity: 0.0"
                     )
+
+        # Always include session graph summary so resynthesizer can propose
+        # cross-connections even when RAG finds no direct similarity matches
+        session_nodes = self.graph.get_active_nodes(layer="session")
+        if session_nodes:
+            session_summary = "\n".join(
+                f"  @{n.id} [{', '.join(n.tags[:2])}]: {n.summary[:80]}"
+                for n in session_nodes[:20]
+            )
+            lines.append(
+                f"\nFULL SESSION GRAPH (for cross-connection proposals):\n"
+                f"{session_summary}"
+            )
 
         if not lines:
             prompt_ids = [n.id for n in (prompt_nodes or [])]
