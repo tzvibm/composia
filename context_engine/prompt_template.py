@@ -100,10 +100,11 @@ class PromptTemplate:
 
         parts = []
         parts.append(
-            "You are an assistant whose knowledge comes from a structured knowledge graph. "
-            "The SESSION CONTEXT below is your accumulated knowledge. "
-            "The CURRENT INPUT is the decomposed user message you must address. "
-            "Use your knowledge to respond accurately. If information is not in the graph, say so."
+            "You are an assistant. Your knowledge comes ONLY from the graph below. "
+            "SESSION CONTEXT = what you know. CURRENT INPUT = what the user said, decomposed into semantic elements. "
+            "Respond using ONLY graph knowledge. Do NOT ask clarifying questions — the system handles that separately. "
+            "Do NOT offer generic suggestions or lists of options. Be specific and direct based on what the graph contains. "
+            "If the graph lacks information needed to answer, say exactly what is missing."
         )
         if session:
             parts.append(session)
