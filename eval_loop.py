@@ -120,10 +120,11 @@ Return JSON:
 
 
 class EvalLoop:
-    def __init__(self, scenario="travel", db_path=None, cycles=20):
+    def __init__(self, scenario="travel", db_path=None, cycles=20, verbose=False):
         self.scenario = SCENARIOS.get(scenario, SCENARIOS["travel"])
         self.db_path = db_path or f"/tmp/composia-eval-{scenario}/context.db"
         self.cycles = cycles
+        self.verbose = verbose
         self.history = []  # (role, message) pairs
         self.results = []
         self.critic = LLMClient(model=REASON_MODEL)
@@ -292,7 +293,11 @@ class EvalLoop:
 
             print(f"\n{'─'*70}")
             print(f"Cycle {cycle+1}/{self.cycles}")
-            print(f"User: {user_msg[:100]}{'...' if len(user_msg) > 100 else ''}")
+            if self.verbose:
+                print(f"\n  USER INPUT:")
+                print(f"  {user_msg}")
+            else:
+                print(f"User: {user_msg[:100]}{'...' if len(user_msg) > 100 else ''}")
 
             start = time.time()
             nodes, edges, sim_count, top_matches, changes, response, completeness, resp_nodes = \
@@ -306,10 +311,35 @@ class EvalLoop:
             context_chars = len(system_prompt)
             context_tokens_est = context_chars // 4
 
-            print(f"Nodes: {len(nodes)} | Edges: {len(edges)} | Similar: {sim_count} | Resp nodes: {len(resp_nodes)}")
-            print(f"Context: ~{context_tokens_est:,} tokens ({context_chars:,} chars)")
-            print(f"Changes: {changes.summary[:80]}")
-            print(f"Response: {response[:120]}...")
+            if self.verbose:
+                print(f"\n  DECOMPOSED NODES ({len(nodes)}):")
+                for n in nodes:
+                    print(f"    @{n.id} [{', '.join(n.tags)}]: {n.summary}")
+                print(f"\n  EDGES ({len(edges)}):")
+                for e in edges:
+                    print(f"    @{e.source_id} --{e.edge_type}--> @{e.target_id}: {e.context}")
+                print(f"\n  RAG MATCHES ({sim_count}):")
+                print(f"    {top_matches}")
+                print(f"\n  RESYNTHESIS:")
+                print(f"    {changes.summary}")
+                print(f"\n  RESPONSE NODES ({len(resp_nodes)}):")
+                for n in resp_nodes:
+                    print(f"    @{n.id} [{', '.join(n.tags)}]: {n.summary}")
+                print(f"\n  SYSTEM PROMPT ({context_chars:,} chars, ~{context_tokens_est:,} tokens):")
+                print(f"    {system_prompt[:500]}...")
+                print(f"\n  LLM RESPONSE:")
+                print(f"  {response}")
+                print(f"\n  GRAPH STATE:")
+                graph_nodes = self.pipeline.graph.list_nodes(layer="session", limit=20)
+                for n in graph_nodes:
+                    fwd = self.pipeline.graph.get_forward_edges(n.id)
+                    edge_str = " → " + ", ".join(f"@{e.target_id}({e.edge_type})" for e in fwd[:3]) if fwd else ""
+                    print(f"    @{n.id} [{', '.join(n.tags[:2])}] w={n.weight:.1f}: {n.summary[:50]}{edge_str}")
+            else:
+                print(f"Nodes: {len(nodes)} | Edges: {len(edges)} | Similar: {sim_count} | Resp nodes: {len(resp_nodes)}")
+                print(f"Context: ~{context_tokens_est:,} tokens ({context_chars:,} chars)")
+                print(f"Changes: {changes.summary[:80]}")
+                print(f"Response: {response[:120]}...")
             print(f"Time: {elapsed:.1f}s")
 
             # Critique
@@ -447,9 +477,10 @@ def main():
     parser = argparse.ArgumentParser(description="Composia eval loop")
     parser.add_argument("--cycles", type=int, default=20, help="Number of cycles")
     parser.add_argument("--scenario", default="travel", choices=list(SCENARIOS.keys()))
+    parser.add_argument("--verbose", "-v", action="store_true", help="Show full prompts/responses")
     args = parser.parse_args()
 
-    loop = EvalLoop(scenario=args.scenario, cycles=args.cycles)
+    loop = EvalLoop(scenario=args.scenario, cycles=args.cycles, verbose=args.verbose)
     loop.run()
 
 
