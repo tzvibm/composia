@@ -9,18 +9,23 @@ from .config import BUILD_MODEL
 
 NODES_PROMPT = """Decompose the following text into atomic semantic elements. Return ONLY nodes — NO edges.
 
+EVERY message must produce at least one node. Even greetings, questions, and casual remarks have structure.
+
 Each node is one atomic element:
 - **fact**: A specific claim. "Marcus enrolled in robotics at MIT on September 12th"
 - **event**: Something that happened. Who, what, when, where. "Diana ran her first marathon in Portland on April 3"
 - **feeling**: An emotion or attitude. "Tom felt overwhelmed by the workload"
 - **decision**: A choice and why. "They picked the lakehouse because it was dog-friendly"
 - **question**: Something asked. "Priya asked about the visa timeline"
-- **correction**: Something changed/updated.
+- **greeting**: Social interaction. "User said hello and asked how things are going"
+- **correction**: Something changed/updated. "Actually, I feel bad today" corrects a prior statement.
+- **mood-change**: An emotional shift. Always note what changed FROM and TO. "User mood shifted from good to bad"
 - **relationship**: Connection between people/things. "Sam and Jordan are business partners since 2019"
 - **temporal**: Time-anchored fact. Always preserve exact date/time.
 - **preference**: A like/dislike. "Elena prefers decaf coffee after 2pm"
 - **plan**: Future intention. "Raj plans to submit the grant by November"
 - **outcome**: A result. "The product launch exceeded targets by 40%"
+- **specification**: A technical requirement with exact values. "Rate limit is 500 requests per minute per user"
 
 Text to decompose ({source}):
 {text}
@@ -37,7 +42,9 @@ Return JSON array of nodes:
 ]
 
 RULES:
+- EVERY message MUST produce at least one node. Greetings produce a "greeting" node. Questions produce a "question" node.
 - NEVER paraphrase. Use EXACT words from the source. If source says "astrophysics", write "astrophysics" not "space science".
+- ALWAYS preserve exact numbers, values, and units. "500 requests per minute" must appear as "500 requests per minute", not "high rate limit".
 - ALWAYS convert relative dates to absolute. If session is "January 15, 2025" and someone says "yesterday", store "January 14, 2025".
 - One ATOMIC element per node. "Diana ran a marathon and felt exhausted" = TWO nodes.
 - IDs should be specific: "diana-marathon-april3" not "marathon"

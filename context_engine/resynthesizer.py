@@ -39,8 +39,14 @@ Return JSON:
 RULES:
 - Preserve exact wording from source when possible
 - If new input contradicts existing, prefer the new input (it's a correction)
+- When a state changes (mood, preference, decision, status), DO NOT just overwrite the old node. Instead:
+  1. Mark the old node as superseded
+  2. Create the new state node
+  3. Create a CHANGE node (tag: "change") that records what changed from/to and connects to both
+  4. Note if the cause of the change is unknown — the summary should flag this so the system can ask the user why
 - Always promote prompt nodes that contain new information
 - The summary should be clear enough for a human to approve or reject
+- If a change has no stated cause, include "UNKNOWN CAUSE" in the summary so the system can follow up
 - Return ONLY valid JSON"""
 
 

@@ -105,8 +105,11 @@ class ContextPipeline:
         # Step 12: Send to reasoning LLM
         response = self.step_12_send(system_prompt, user_input)
 
-        # Step 13: Process response (decompose into session graph)
-        self.step_13_process_response(response)
+        # Step 13: Process response (decompose + auto-approve for non-verbose)
+        resp_nodes, resp_edges = self.step_13_process_response(response)
+        if resp_nodes:
+            self.approve_response_graph(resp_nodes)
+        self.graph.clear_layer("prompt")
 
         return response
 
@@ -154,17 +157,21 @@ class ContextPipeline:
         )
 
     def step_13_process_response(self, response):
-        """Decompose LLM response and add to session graph."""
+        """Decompose LLM response into response graph, return for approval."""
         nodes, edges = self.decomposer.build_prompt_graph(response, source="assistant")
         if nodes:
-            # Directly promote response nodes to session (no approval needed)
-            for node in nodes:
-                node.layer = "session"
+            # Store as 'prompt' layer (will be promoted on approval)
             self.graph.batch_put_nodes(nodes)
             self.graph.batch_put_edges(edges)
-            # Index in vector store
             items = [(n.id, f"{n.title} {n.summary}") for n in nodes]
             self.vectors.upsert_batch(items)
+        return nodes, edges
+
+    def approve_response_graph(self, nodes):
+        """Promote approved response nodes to session."""
+        if nodes:
+            node_ids = [n.id for n in nodes]
+            self.graph.promote_nodes(node_ids, to_layer="session")
 
     def ingest(self, text, source="context"):
         """Ingest text directly into session graph (for benchmarks)."""
@@ -272,6 +279,26 @@ class ContextPipeline:
         if changes.remove_edges: print(f"    Remove edges: {len(changes.remove_edges)}")
         if changes.promote_nodes: print(f"    Promote: {len(changes.promote_nodes)} prompt → session")
 
+        # If change has unknown cause, ask the user
+        if "UNKNOWN CAUSE" in changes.summary.upper():
+            print(f"\n  The system detected a change but doesn't know why.")
+            try:
+                reason = input("  Why? (press ENTER to skip): ").strip()
+            except EOFError:
+                reason = ""
+            if reason:
+                # Create a cause node and link it
+                from .models import Node, Edge
+                cause_node = Node(
+                    id=f"cause-{len(nodes)}", layer="prompt",
+                    title=f"Cause: {reason[:50]}",
+                    content=reason, summary=reason,
+                    tags=["cause"],
+                )
+                self.graph.put_node(cause_node)
+                changes.promote_nodes.append(cause_node.id)
+                changes.summary += f" Cause: {reason}"
+
         try:
             approval = input("  Approve? [Y/n]: ").strip().lower()
         except EOFError:
@@ -295,8 +322,29 @@ class ContextPipeline:
 
         response = self.step_12_send(system_prompt, user_input)
 
-        print(f"\n  [Step 13] Processing response...")
-        self.step_13_process_response(response)
+        print(f"\n  [Step 13] Decomposing response into response graph...")
+        resp_nodes, resp_edges = self.step_13_process_response(response)
+
+        if resp_nodes:
+            print(f"  Response graph: {len(resp_nodes)} nodes, {len(resp_edges)} edges")
+            for n in resp_nodes[:5]:
+                print(f"    @{n.id} [{', '.join(n.tags[:2])}]: {n.summary[:60]}")
+            if len(resp_nodes) > 5:
+                print(f"    ... and {len(resp_nodes) - 5} more")
+
+            try:
+                approval = input("  Add response to session graph? [Y/n]: ").strip().lower()
+            except EOFError:
+                approval = "y"
+            if approval != "n":
+                self.approve_response_graph(resp_nodes)
+                print(f"  Response graph merged into session.")
+            else:
+                # Delete unapproved response nodes
+                for n in resp_nodes:
+                    self.graph.delete_node(n.id)
+                print(f"  Response graph discarded.")
+
         self.graph.clear_layer("prompt")
 
         stats = self.stats()

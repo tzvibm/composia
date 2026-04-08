@@ -19,9 +19,8 @@ class VectorStore:
         self.conn = conn
         self.model_name = model_name or EMBED_MODEL
         self._model = None
+        self._cache = {}  # node_id -> numpy array (must init before _setup_table)
         self._setup_table()
-        # In-memory cache for fast search
-        self._cache = {}  # node_id -> numpy array
 
     def _setup_table(self):
         """Create embeddings table in shared SQLite DB."""
