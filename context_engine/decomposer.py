@@ -43,9 +43,11 @@ Return JSON array of nodes:
 
 RULES:
 - EVERY message MUST produce at least one node. Greetings produce a "greeting" node. Questions produce a "question" node.
+- Do NOT create nodes for conversational filler: "Actually, wait", "Yeah", "Okay so", "I mean", "Like" — these are not semantic elements. Only extract substantive content.
 - NEVER paraphrase. Use EXACT words from the source. If source says "astrophysics", write "astrophysics" not "space science".
 - ALWAYS preserve exact numbers, values, and units. "500 requests per minute" must appear as "500 requests per minute", not "high rate limit".
 - ALWAYS convert relative dates to absolute. If session is "January 15, 2025" and someone says "yesterday", store "January 14, 2025".
+- Separate entities into distinct nodes: "Nicaragua, San Juan del Sur" = TWO nodes (country + city) connected by a "located_in" edge.
 - One ATOMIC element per node. "Diana ran a marathon and felt exhausted" = TWO nodes.
 - IDs should be specific: "diana-marathon-april3" not "marathon"
 - Return ONLY valid JSON array."""
@@ -94,11 +96,22 @@ Nodes:
 Return a JSON array of edges. Each edge has:
 - source_id: the node this edge comes FROM
 - target_id: the node this edge goes TO
-- edge_type: one of [causes, relates_to, contradicts, temporal_sequence, spatial_sequence, part_of, describes, corrects, supports, located_in, contains]
+- edge_type: Use the MOST SPECIFIC type that fits:
+  - "answers" — response addresses a question
+  - "causes" — A leads to B
+  - "constrains" — A limits/restricts B
+  - "contradicts" — A conflicts with B
+  - "corrects" — A updates/fixes B
+  - "supports" — A reinforces/validates B
+  - "part_of" — A is a component of B
+  - "located_in" — A is geographically within B (city→country)
+  - "contains" — A contains B
+  - "temporal_sequence" — A happens before B
+  - "spatial_sequence" — A is near/adjacent to B
+  - "describes" — A provides detail about B
+  - "informs" — A provides context for deciding B
+  - "relates_to" — ONLY when no specific type fits
 - context: brief explanation of why this edge exists
-
-Use spatial_sequence for geographic/physical relationships (e.g. city→country, room→building).
-Use located_in for "X is in Y". Use contains for "X contains Y".
 
 [
   {{

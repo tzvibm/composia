@@ -50,7 +50,22 @@ RULES:
 - When a state changes (mood, preference, decision), create a CHANGE node (tag: "change") recording from/to, don't just overwrite
 - If a change has no stated cause, include "UNKNOWN CAUSE" in the summary
 - Always promote prompt nodes that contain new information
-- IMPORTANT: Look at the FULL SESSION GRAPH and propose edges between new nodes and ANY existing session nodes they logically relate to, even if they weren't found by similarity search. For example, if a user says "I want to have fun" and the session has a "trip to Nicaragua" node, create an edge connecting them.
+- IMPORTANT: Look at the FULL SESSION GRAPH and propose edges between new nodes and ANY existing session nodes they logically relate to, even if they weren't found by similarity search.
+- MERGE DUPLICATES: If a new node covers the same concept as an existing session node, use "resynthesize" to merge them — do NOT create a duplicate. Check node summaries carefully.
+- USE PRECISE EDGE TYPES: Do not default to "relates_to". Use specific types:
+  - "answers" — response addresses a question
+  - "causes" — A leads to B
+  - "constrains" — A limits/restricts B
+  - "contradicts" — A conflicts with B
+  - "corrects" — A updates/fixes B
+  - "supports" — A reinforces/validates B
+  - "part_of" — A is a component of B
+  - "located_in" — A is geographically within B
+  - "temporal_sequence" — A happens before B
+  - "spatial_sequence" — A is near/adjacent to B
+  - "describes" — A provides detail about B
+  - "informs" — A provides context for deciding B
+  Only use "relates_to" when no specific type fits.
 - Return ONLY valid JSON"""
 
 

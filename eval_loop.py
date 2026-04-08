@@ -268,9 +268,10 @@ class EvalLoop:
         response = self.pipeline.step_12_send(system_prompt, user_msg)
 
         # Step 13
+        prompt_ids = [n.id for n in nodes]
         resp_nodes, resp_edges = self.pipeline.step_13_process_response(response)
         if resp_nodes:
-            self.pipeline.approve_response_graph(resp_nodes)
+            self.pipeline.approve_response_graph(resp_nodes, prompt_node_ids=prompt_ids)
         self.pipeline.graph.clear_layer("prompt")
 
         return nodes, edges, len(similar), top_matches, changes, response, completeness, resp_nodes or []

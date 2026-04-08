@@ -106,9 +106,10 @@ class ContextPipeline:
         response = self.step_12_send(system_prompt, user_input)
 
         # Step 13: Process response (decompose + auto-approve for non-verbose)
+        prompt_ids = [n.id for n in nodes]
         resp_nodes, resp_edges = self.step_13_process_response(response)
         if resp_nodes:
-            self.approve_response_graph(resp_nodes)
+            self.approve_response_graph(resp_nodes, prompt_node_ids=prompt_ids)
         self.graph.clear_layer("prompt")
 
         return response
@@ -161,11 +162,26 @@ class ContextPipeline:
             self.vectors.upsert_batch(items)
         return nodes, edges
 
-    def approve_response_graph(self, nodes):
-        """Promote approved response nodes to session."""
-        if nodes:
-            node_ids = [n.id for n in nodes]
-            self.graph.promote_nodes(node_ids, to_layer="session")
+    def approve_response_graph(self, resp_nodes, prompt_node_ids=None):
+        """Promote approved response nodes to session and link to prompt nodes."""
+        if not resp_nodes:
+            return
+        resp_ids = [n.id for n in resp_nodes]
+        self.graph.promote_nodes(resp_ids, to_layer="session")
+
+        # Auto-create 'answers' edges from response nodes to the prompt nodes
+        # that triggered them (now promoted to session)
+        if prompt_node_ids:
+            from .models import Edge as EdgeModel
+            for resp_node in resp_nodes:
+                for prompt_id in prompt_node_ids:
+                    if self.graph.get_node(prompt_id):  # still exists in session
+                        self.graph.put_edge(EdgeModel(
+                            source_id=resp_node.id,
+                            target_id=prompt_id,
+                            edge_type="answers",
+                            context="Response to user input",
+                        ))
 
     def ingest(self, text, source="context"):
         """Ingest text directly into session graph (for benchmarks)."""
@@ -311,7 +327,8 @@ class ContextPipeline:
             except EOFError:
                 approval = "y"
             if approval != "n":
-                self.approve_response_graph(resp_nodes)
+                prompt_ids = [n.id for n in nodes]
+                self.approve_response_graph(resp_nodes, prompt_node_ids=prompt_ids)
                 print(f"  Response graph merged into session.")
             else:
                 # Delete unapproved response nodes
