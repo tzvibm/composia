@@ -106,7 +106,9 @@ class GraphStore:
 
     def open(self):
         self.conn = sqlite3.connect(self.db_path)
-        self.conn.execute("PRAGMA journal_mode=WAL")
+        # Use DELETE journal mode — WAL causes disk I/O errors on iCloud-synced dirs
+        self.conn.execute("PRAGMA journal_mode=DELETE")
+        self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
         self.conn.commit()
@@ -372,10 +374,14 @@ class GraphStore:
     # --- Stats ---
 
     def stats(self):
-        return {
-            "total_nodes": self.count_nodes(),
-            "session_nodes": self.count_nodes("session"),
-            "prompt_nodes": self.count_nodes("prompt"),
-            "system_nodes": self.count_nodes("system"),
-            "total_edges": self.count_edges(),
-        }
+        try:
+            return {
+                "total_nodes": self.count_nodes(),
+                "session_nodes": self.count_nodes("session"),
+                "prompt_nodes": self.count_nodes("prompt"),
+                "system_nodes": self.count_nodes("system"),
+                "total_edges": self.count_edges(),
+            }
+        except sqlite3.OperationalError:
+            return {"total_nodes": -1, "session_nodes": -1, "prompt_nodes": -1,
+                    "system_nodes": -1, "total_edges": -1}
