@@ -1,4 +1,4 @@
-"""Steps 8-9: Evaluate completeness, propose graph mutations, apply with approval."""
+"""Steps 8-9: Propose graph mutations and apply with approval."""
 
 import json
 
@@ -8,68 +8,47 @@ from .llm_client import LLMClient
 from .config import BUILD_MODEL
 
 
-RESYNTHESIZE_PROMPT = """You are maintaining a knowledge graph. Given pairs of new input nodes and existing session nodes:
-
-1. EVALUATE each new node for 5W1H completeness (Who, What, Where, When, Why, How)
-2. PROPOSE changes to the session graph
+RESYNTHESIZE_PROMPT = """You are maintaining a knowledge graph. Given pairs of new input nodes and existing session nodes, propose changes to the session graph.
 
 Pairs (new input <-> existing knowledge):
 {tuples_formatted}
 
-Return JSON with TWO sections:
+For each pair, decide what to do:
+- **resynthesize**: Merge new and existing content into improved content
+- **correct**: The new input corrects/updates existing knowledge
+- **add_content**: Add new details to existing node
+- **update_summary**: Update a node's summary to be more accurate
+- **delete**: Remove a node that is wrong or superseded
+- **new_edge**: Create a new connection between nodes
+- **remove_edge**: Remove an incorrect connection
+- **promote**: New prompt nodes that should become session knowledge
 
+Also evaluate each NEW node for 5W1H completeness (Who, What, Where, When, Why, How).
+Include a "completeness" section showing which dimensions are missing.
+
+Return JSON:
 {{
+  "resynthesize": [["node-id", "new merged content"]],
+  "correct": [["node-id", "corrected content"]],
+  "add_content": [["node-id", "additional content to append"]],
+  "update_summaries": [["node-id", "new summary"]],
+  "delete": ["node-id-to-remove"],
+  "new_edges": [{{"source_id": "a", "target_id": "b", "edge_type": "relates_to", "context": "why"}}],
+  "remove_edges": [["source-id", "target-id"]],
+  "promote_nodes": ["prompt-node-id-to-keep"],
   "completeness": [
-    {{
-      "node_id": "the-node-id",
-      "who": {{"present": true/false, "value": "..." or null}},
-      "what": {{"present": true/false, "value": "..." or null}},
-      "where": {{"present": true/false, "value": "..." or null}},
-      "when": {{"present": true/false, "value": "..." or null}},
-      "why": {{"present": true/false, "value": "..." or null}},
-      "how": {{"present": true/false, "value": "..." or null}},
-      "score": 0.0-1.0,
-      "missing_questions": ["What is the budget?", "When is the trip?"]
-    }}
+    {{"node_id": "id", "score": 0.0-1.0, "missing": ["When is this happening?", "Why was this decided?"]}}
   ],
-  "changes": {{
-    "resynthesize": [["node-id", "new merged content"]],
-    "correct": [["node-id", "corrected content"]],
-    "add_content": [["node-id", "additional content to append"]],
-    "update_summaries": [["node-id", "new summary"]],
-    "delete": ["node-id-to-remove"],
-    "new_edges": [{{"source_id": "a", "target_id": "b", "edge_type": "relates_to", "context": "why"}}],
-    "remove_edges": [["source-id", "target-id"]],
-    "promote_nodes": ["prompt-node-id-to-keep"],
-    "summary": "Human-readable summary of all changes in 2-3 sentences"
-  }}
+  "summary": "Human-readable summary of all changes in 2-3 sentences"
 }}
 
 RULES:
-- Evaluate EVERY new node for 5W1H. Not all apply to every node (a greeting doesn't need "where") — score accordingly.
-- missing_questions should be specific, actionable questions to ask the user.
-- score is the fraction of APPLICABLE 5W1H dimensions that are present (0.0-1.0).
-- Preserve exact wording from source when possible.
-- If new input contradicts existing, prefer the new input (it's a correction).
-- When a state changes (mood, preference, decision), create a CHANGE node (tag: "change") recording from/to, don't just overwrite.
-- If a change has no stated cause, include "UNKNOWN CAUSE" in the summary.
-- Always promote prompt nodes that contain new information.
-- Return ONLY valid JSON."""
-
-
-FOLLOWUP_PROMPT = """The user provided additional information to complete incomplete nodes.
-
-Original nodes with gaps:
-{incomplete_nodes}
-
-User's additional input:
-{user_input}
-
-Update the nodes with the new information and re-evaluate completeness.
-Return the same JSON format as before (completeness + changes).
-Only include nodes that were updated or are still incomplete.
-
-Return ONLY valid JSON with the same structure as before."""
+- Preserve exact wording from source when possible
+- If new input contradicts existing, prefer the new input (it's a correction)
+- When a state changes (mood, preference, decision), create a CHANGE node (tag: "change") recording from/to, don't just overwrite
+- If a change has no stated cause, include "UNKNOWN CAUSE" in the summary
+- Always promote prompt nodes that contain new information
+- Return ONLY valid JSON"""
 
 
 class Resynthesizer:
@@ -77,17 +56,8 @@ class Resynthesizer:
         self.graph = graph
         self.llm = llm or LLMClient(model=BUILD_MODEL)
 
-    def propose_changes(self, tuples, prompt_nodes=None, interactive=False,
-                        completeness_threshold=0.7, max_loops=3):
-        """Step 8: Evaluate 5W1H completeness + propose graph mutations.
-
-        If interactive=True, loops until all nodes reach completeness_threshold,
-        asking the user for missing information at each iteration.
-        """
-        if not tuples and not prompt_nodes:
-            return ChangeSet(summary="Nothing to process.")
-
-        # Build the LLM prompt
+    def propose_changes(self, tuples, prompt_nodes=None):
+        """Step 8: Propose graph mutations + 5W1H completeness info."""
         lines = self._format_tuples(tuples)
 
         # Include orphan prompt nodes (no matching session nodes)
@@ -110,7 +80,6 @@ class Resynthesizer:
                 summary="No existing knowledge. All new input promoted to session.",
             )
 
-        # First evaluation
         try:
             result = self.llm.call_json(
                 RESYNTHESIZE_PROMPT.format(tuples_formatted="\n\n".join(lines))
@@ -122,60 +91,7 @@ class Resynthesizer:
                 summary=f"Resynthesis failed ({e}). Promoting all new nodes.",
             )
 
-        completeness = result.get("completeness", [])
-        changes_data = result.get("changes", result)  # fallback if flat structure
-
-        # Interactive completeness loop
-        if interactive and completeness:
-            for loop in range(max_loops):
-                incomplete = [c for c in completeness
-                              if c.get("score", 1.0) < completeness_threshold
-                              and c.get("missing_questions")]
-                if not incomplete:
-                    break
-
-                # Show gaps and ask user
-                print(f"\n  Incomplete nodes ({len(incomplete)}):")
-                all_questions = []
-                for c in incomplete:
-                    nid = c["node_id"]
-                    score = c.get("score", 0)
-                    questions = c.get("missing_questions", [])
-                    print(f"    @{nid} (completeness: {score:.0%})")
-                    for q in questions:
-                        print(f"      ? {q}")
-                        all_questions.append(q)
-
-                if not all_questions:
-                    break
-
-                try:
-                    user_answer = input(f"\n  Answer (or ENTER to skip): ").strip()
-                except EOFError:
-                    break
-
-                if not user_answer:
-                    break
-
-                # Re-evaluate with user's additional info
-                incomplete_formatted = "\n".join(
-                    f"@{c['node_id']} (score: {c.get('score', 0):.0%}): "
-                    f"missing: {', '.join(c.get('missing_questions', []))}"
-                    for c in incomplete
-                )
-                try:
-                    result = self.llm.call_json(
-                        FOLLOWUP_PROMPT.format(
-                            incomplete_nodes=incomplete_formatted,
-                            user_input=user_answer,
-                        )
-                    )
-                    completeness = result.get("completeness", completeness)
-                    changes_data = result.get("changes", changes_data)
-                except (ValueError, Exception):
-                    break
-
-        return self._parse_changes(changes_data, completeness, prompt_nodes, tuples)
+        return self._parse_changes(result, prompt_nodes, tuples)
 
     def _format_tuples(self, tuples):
         lines = []
@@ -201,43 +117,36 @@ class Resynthesizer:
             )
         return lines
 
-    def _parse_changes(self, changes_data, completeness, prompt_nodes, tuples):
-        """Parse the LLM's response into a ChangeSet."""
-        # Handle both nested and flat formats
-        if isinstance(changes_data, dict) and "changes" in changes_data:
-            changes_data = changes_data["changes"]
-        if not isinstance(changes_data, dict):
-            changes_data = {}
+    def _parse_changes(self, result, prompt_nodes, tuples):
+        if not isinstance(result, dict):
+            result = {}
 
         changeset = ChangeSet(
-            resynthesize=changes_data.get("resynthesize", []),
-            correct=changes_data.get("correct", []),
-            add_content=changes_data.get("add_content", []),
-            update_summaries=changes_data.get("update_summaries", []),
-            delete=changes_data.get("delete", []),
+            resynthesize=result.get("resynthesize", []),
+            correct=result.get("correct", []),
+            add_content=result.get("add_content", []),
+            update_summaries=result.get("update_summaries", []),
+            delete=result.get("delete", []),
             new_edges=[
                 Edge(
                     source_id=e["source_id"], target_id=e["target_id"],
                     edge_type=e.get("edge_type", "relates_to"),
                     context=e.get("context", ""),
                 )
-                for e in changes_data.get("new_edges", [])
+                for e in result.get("new_edges", [])
                 if isinstance(e, dict) and "source_id" in e
             ],
-            remove_edges=changes_data.get("remove_edges", []),
-            promote_nodes=changes_data.get("promote_nodes", []),
-            summary=changes_data.get("summary", "Changes proposed."),
+            remove_edges=result.get("remove_edges", []),
+            promote_nodes=result.get("promote_nodes", []),
+            summary=result.get("summary", "Changes proposed."),
         )
+
+        # Store completeness info for display
+        changeset.properties["completeness"] = result.get("completeness", [])
 
         # If no promote_nodes specified, promote all prompt nodes
         if not changeset.promote_nodes and prompt_nodes:
-            matched = {t.prompt_node.id for t in tuples} if tuples else set()
-            unmatched = [n.id for n in prompt_nodes if n.id not in matched]
-            if unmatched:
-                changeset.promote_nodes = unmatched
-
-        # Attach completeness data for display
-        changeset.properties["completeness"] = completeness
+            changeset.promote_nodes = [n.id for n in prompt_nodes]
 
         return changeset
 
@@ -258,47 +167,39 @@ class Resynthesizer:
             if approval != "y":
                 return changes
 
-        # Apply resynthesis
         for node_id, new_content in changes.resynthesize:
             node = self.graph.get_node(node_id)
             if node:
                 node.content = new_content
                 self.graph.put_node(node)
 
-        # Apply corrections
         for node_id, correction in changes.correct:
             node = self.graph.get_node(node_id)
             if node:
                 node.content = correction
                 self.graph.put_node(node)
 
-        # Add content
         for node_id, additional in changes.add_content:
             node = self.graph.get_node(node_id)
             if node:
                 node.content += f"\n\n{additional}"
                 self.graph.put_node(node)
 
-        # Update summaries
         for node_id, new_summary in changes.update_summaries:
             node = self.graph.get_node(node_id)
             if node:
                 node.summary = new_summary
                 self.graph.put_node(node)
 
-        # Delete nodes
         for node_id in changes.delete:
             self.graph.delete_node(node_id)
 
-        # New edges
         for edge in changes.new_edges:
             self.graph.put_edge(edge)
 
-        # Remove edges
         for source_id, target_id in changes.remove_edges:
             self.graph.remove_edge(source_id, target_id)
 
-        # Promote prompt nodes to session
         if changes.promote_nodes:
             self.graph.promote_nodes(changes.promote_nodes, to_layer="session")
 

@@ -86,9 +86,9 @@ class ContextPipeline:
             tuples = self.step_7_traverse(tuples)
 
         # Step 8: Propose graph changes
-        changes = self.step_8_resynthesize(tuples, nodes)
+        changes = self.step_8_resynthesize(tuples, prompt_nodes=nodes)
 
-        # Step 9: Apply changes (with optional approval)
+        # Step 9: Apply changes
         self.step_9_approve(changes)
 
         # Build similarity map for template rendering
@@ -134,10 +134,9 @@ class ContextPipeline:
             max_iter=self.max_traversal,
         )
 
-    def step_8_resynthesize(self, tuples, prompt_nodes=None, interactive=False):
+    def step_8_resynthesize(self, tuples, prompt_nodes=None):
         return self.resynthesizer.propose_changes(
             tuples, prompt_nodes=prompt_nodes,
-            interactive=interactive,
         )
 
     def step_9_approve(self, changes):
@@ -262,8 +261,8 @@ class ContextPipeline:
         else:
             print(f"  No similar session nodes found")
 
-        print(f"\n  [Steps 8-9] Resynthesis + 5W1H evaluation...")
-        changes = self.step_8_resynthesize(tuples, prompt_nodes=nodes, interactive=True)
+        print(f"\n  [Step 8] Proposing graph changes...")
+        changes = self.step_8_resynthesize(tuples, prompt_nodes=nodes)
         print(f"\n  Proposed changes:")
         print(f"    {changes.summary}")
         if changes.resynthesize: print(f"    Resynthesize: {len(changes.resynthesize)} nodes")
@@ -273,26 +272,6 @@ class ContextPipeline:
         if changes.new_edges: print(f"    New edges: {len(changes.new_edges)}")
         if changes.remove_edges: print(f"    Remove edges: {len(changes.remove_edges)}")
         if changes.promote_nodes: print(f"    Promote: {len(changes.promote_nodes)} prompt → session")
-
-        # If change has unknown cause, ask the user
-        if "UNKNOWN CAUSE" in changes.summary.upper():
-            print(f"\n  The system detected a change but doesn't know why.")
-            try:
-                reason = input("  Why? (press ENTER to skip): ").strip()
-            except EOFError:
-                reason = ""
-            if reason:
-                # Create a cause node and link it
-                from .models import Node, Edge
-                cause_node = Node(
-                    id=f"cause-{len(nodes)}", layer="prompt",
-                    title=f"Cause: {reason[:50]}",
-                    content=reason, summary=reason,
-                    tags=["cause"],
-                )
-                self.graph.put_node(cause_node)
-                changes.promote_nodes.append(cause_node.id)
-                changes.summary += f" Cause: {reason}"
 
         try:
             approval = input("  Approve? [Y/n]: ").strip().lower()
@@ -344,6 +323,16 @@ class ContextPipeline:
 
         stats = self.stats()
         print(f"  Graph: {stats['session_nodes']} session nodes, {stats['total_edges']} edges")
+
+        # Show 5W1H gaps (info only, doesn't block pipeline)
+        completeness = changes.properties.get("completeness", [])
+        incomplete = [c for c in completeness if c.get("score", 1.0) < 0.7 and c.get("missing")]
+        if incomplete:
+            print(f"\n  5W1H gaps (unanswered questions):")
+            for c in incomplete:
+                print(f"    @{c['node_id']} ({c.get('score', 0):.0%} complete)")
+                for q in c.get("missing", []):
+                    print(f"      ? {q}")
 
         return response
 
