@@ -357,25 +357,28 @@ class ContextPipeline:
         print(f"  Context size: ~{system_prompt_tokens:,} tokens ({len(system_prompt):,} chars)")
 
         # Show 5W1H gaps — only critical questions (confidence >= 0.8)
+        # RAG search each question first to check if already answered
         completeness = changes.properties.get("completeness", [])
-        critical_questions = []
+        truly_unanswered = []
         for c in completeness:
             for q in c.get("missing", []):
                 if isinstance(q, dict) and q.get("confidence", 0) >= 0.8:
-                    critical_questions.append((c.get("node_id", "?"), q))
-                elif isinstance(q, str):
-                    # Legacy format without confidence — skip low-value
-                    pass
+                    qtext = q["question"]
+                    # Check if session graph already has the answer
+                    rag_results = self.vectors.search(qtext, limit=3, layer="session")
+                    top_score = rag_results[0].score if rag_results else 0
+                    if top_score < 0.75:  # not sufficiently answered
+                        truly_unanswered.append((c.get("node_id", "?"), q))
 
-        if critical_questions:
-            print(f"\n  Critical unanswered questions:")
-            for node_id, q in critical_questions:
+        if truly_unanswered:
+            print(f"\n  Unanswered questions (not found in graph):")
+            for node_id, q in truly_unanswered:
                 qtext = q["question"] if isinstance(q, dict) else q
                 conf = q.get("confidence", "?") if isinstance(q, dict) else "?"
                 print(f"    @{node_id}: {qtext} (confidence: {conf})")
 
             # Add top questions to graph as question nodes
-            for node_id, q in critical_questions[:3]:  # max 3
+            for node_id, q in truly_unanswered[:3]:
                 qtext = q["question"] if isinstance(q, dict) else q
                 dim = q.get("dimension", "unknown") if isinstance(q, dict) else "unknown"
                 q_node = Node(
@@ -387,7 +390,6 @@ class ContextPipeline:
                     tags=["question", "5w1h", dim],
                 )
                 self.graph.put_node(q_node)
-                # Link question to the node it's about
                 from .models import Edge as EdgeModel
                 self.graph.put_edge(EdgeModel(
                     source_id=f"5w1h-{node_id}-{dim}",
