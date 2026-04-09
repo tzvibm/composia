@@ -10,6 +10,20 @@ from .config import (
 )
 
 
+QUERY_GENERATION_PROMPT = """Given these new input nodes, generate search queries to find relevant context in the session graph.
+
+New input nodes:
+{nodes_formatted}
+
+Generate 3-5 search queries that would find relevant prior context. Think about:
+- What has the user previously said that relates to this?
+- What preferences, constraints, or facts were mentioned earlier?
+- What topics or entities connect to this input?
+
+Return ONLY a JSON array of query strings:
+["query one", "query two", "query three"]"""
+
+
 TRAVERSAL_PROMPT = """Given these pairs of (new input, existing knowledge) with similarity scores, rate your confidence that you have enough context.
 
 Pairs:
@@ -32,11 +46,29 @@ class Retriever:
         items = [(n.id, f"{n.title} {n.summary}") for n in nodes]
         self.vectors.upsert_batch(items)
 
+    def generate_search_queries(self, prompt_nodes):
+        """Generate LLM-powered search queries from prompt graph."""
+        nodes_formatted = "\n".join(
+            f"@{n.id} [{', '.join(n.tags)}]: {n.summary}"
+            for n in prompt_nodes
+        )
+        try:
+            queries = self.llm.call_json(
+                QUERY_GENERATION_PROMPT.format(nodes_formatted=nodes_formatted)
+            )
+            if isinstance(queries, list):
+                return [q for q in queries if isinstance(q, str)]
+        except (ValueError, Exception):
+            pass
+        return []
+
     def find_similar(self, prompt_nodes, top_k=None):
-        """Step 5: For each prompt node, find similar session nodes."""
+        """Step 5: RAG search using both node embeddings AND LLM-generated queries."""
         top_k = top_k or RAG_TOP_K
         all_results = []
         seen = set()
+
+        # Search using raw node embeddings
         for pn in prompt_nodes:
             query = f"{pn.title} {pn.summary}"
             results = self.vectors.search(query, limit=top_k, layer="session")
@@ -44,6 +76,16 @@ class Retriever:
                 if r.node.id not in seen:
                     seen.add(r.node.id)
                     all_results.append(r)
+
+        # Search using LLM-generated queries
+        llm_queries = self.generate_search_queries(prompt_nodes)
+        for query in llm_queries:
+            results = self.vectors.search(query, limit=top_k // 2, layer="session")
+            for r in results:
+                if r.node.id not in seen:
+                    seen.add(r.node.id)
+                    all_results.append(r)
+
         return all_results
 
     def build_tuples(self, prompt_nodes, similar_results):
