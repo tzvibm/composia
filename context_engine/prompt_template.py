@@ -99,7 +99,7 @@ class PromptTemplate:
         prompt = self.render_prompt(similar_map)
 
         parts = []
-        parts.append("Respond to the user naturally and directly.")
+        parts.append("Respond to the user naturally. Be concise and direct — no filler, no lists of options, no preamble.")
         if session:
             parts.append(session)
         if prompt:
