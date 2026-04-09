@@ -56,19 +56,17 @@ RULES:
 RESPONSE_NODES_PROMPT = """Extract ONLY substantive knowledge from this assistant response. IGNORE filler.
 
 DO NOT extract:
-- Greetings, pleasantries ("I'd be happy to help!", "Great question!")
-- Meta-commentary ("Here's what I think:", "Based on the context:")
-- Hedging ("I believe", "It seems like", "Perhaps")
-- Restatements of what the user already said
-- Transitional phrases ("Let me explain", "To summarize")
-- Offers to help ("Let me know if you need anything else")
+- Pure greetings with no content ("Hello!", "Great question!")
+- Meta-commentary about the system itself
+- Transitional phrases alone ("Let me explain")
 
-DO extract:
-- New facts, recommendations, or suggestions the assistant provided
-- Specific answers to questions (with exact values/names)
-- Decisions or conclusions reached
-- Action items or next steps proposed
-- Corrections to prior information
+DO extract (even if surrounded by filler):
+- Specific recommendations ("visit Ometepe Island for 2-3 days")
+- Factual claims ("Ometepe has two volcanoes")
+- Answers to questions with specific details
+- Suggestions with reasoning ("head south first because...")
+- Time/cost/distance estimates
+- Warnings or caveats ("rainy season starts in May")
 
 Text to extract from (assistant response):
 {text}
@@ -96,21 +94,22 @@ Nodes:
 Return a JSON array of edges. Each edge has:
 - source_id: the node this edge comes FROM
 - target_id: the node this edge goes TO
-- edge_type: Use the MOST SPECIFIC type that fits:
-  - "answers" — response addresses a question
-  - "causes" — A leads to B
-  - "constrains" — A limits/restricts B
-  - "contradicts" — A conflicts with B
-  - "corrects" — A updates/fixes B
-  - "supports" — A reinforces/validates B
-  - "part_of" — A is a component of B
-  - "located_in" — A is geographically within B (city→country)
-  - "contains" — A contains B
-  - "temporal_sequence" — A happens before B
-  - "spatial_sequence" — A is near/adjacent to B
-  - "describes" — A provides detail about B
-  - "informs" — A provides context for deciding B
-  - "relates_to" — ONLY when no specific type fits
+- edge_type and DIRECTION rules (get these right!):
+  - "causes": cause → effect (NOT effect → cause)
+  - "informs": context → decision (the context informs the decision, NOT the other way)
+  - "constrains": constraint → what it limits
+  - "supports": evidence → claim it supports
+  - "answers": answer → question it answers
+  - "corrects": correction → what it corrects
+  - "contradicts": new info → old info it contradicts
+  - "part_of": part → whole
+  - "located_in": specific place → broader place (city → country)
+  - "temporal_sequence": earlier → later
+  - "spatial_sequence": place A → nearby place B
+  - "describes": detail → thing it describes
+  - "relates_to": ONLY when no specific type fits
+
+  DIRECTION MATTERS. "User wants recommendations" is CAUSED BY "user has interests" — so: interest → request (causes), NOT request → interest.
 - context: brief explanation of why this edge exists
 
 [

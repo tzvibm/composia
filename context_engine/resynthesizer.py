@@ -51,7 +51,7 @@ RULES:
 - If a change has no stated cause, include "UNKNOWN CAUSE" in the summary
 - Always promote prompt nodes that contain new information
 - IMPORTANT: Look at the FULL SESSION GRAPH and propose edges between new nodes and ANY existing session nodes they logically relate to, even if they weren't found by similarity search.
-- MERGE DUPLICATES: If a new node covers the same concept as an existing session node, use "resynthesize" to merge them — do NOT create a duplicate. Check node summaries carefully.
+- MERGE DUPLICATES: If a new node covers the same concept as an existing session node, use "resynthesize" to merge content into the EXISTING node, and add the new node's ID to "delete" so it gets removed. Do NOT keep both. Example: if @user-wildlife-interest overlaps with @user-interest-nature, resynthesize @user-interest-nature with merged content and delete @user-wildlife-interest.
 - USE PRECISE EDGE TYPES: Do not default to "relates_to". Use specific types:
   - "answers" — response addresses a question
   - "causes" — A leads to B
