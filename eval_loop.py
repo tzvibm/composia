@@ -269,6 +269,11 @@ class EvalLoop:
         system_prompt = self.pipeline.template.render_full(similar_map)
         response = self.pipeline.step_12_send(system_prompt, user_msg)
 
+        # Promote remaining prompt nodes before step 13
+        remaining = self.pipeline.graph.list_nodes(layer="prompt")
+        if remaining:
+            self.pipeline.graph.promote_nodes([n.id for n in remaining], to_layer="session")
+
         # Step 13
         prompt_ids = [n.id for n in nodes]
         resp_nodes, resp_edges = self.pipeline.step_13_process_response(response)

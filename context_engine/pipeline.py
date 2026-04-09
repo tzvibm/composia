@@ -105,11 +105,18 @@ class ContextPipeline:
         # Step 12: Send to reasoning LLM
         response = self.step_12_send(system_prompt, user_input)
 
-        # Step 13: Process response (decompose + auto-approve for non-verbose)
+        # Ensure all prompt nodes are promoted to session before clearing
+        # (resynthesizer may not have promoted all of them)
+        remaining_prompt = self.graph.list_nodes(layer="prompt")
+        if remaining_prompt:
+            self.graph.promote_nodes([n.id for n in remaining_prompt], to_layer="session")
+
+        # Step 13: Process response (decompose + link to prompt nodes)
         prompt_ids = [n.id for n in nodes]
         resp_nodes, resp_edges = self.step_13_process_response(response)
         if resp_nodes:
             self.approve_response_graph(resp_nodes, prompt_node_ids=prompt_ids)
+
         self.graph.clear_layer("prompt")
 
         return response
@@ -299,6 +306,11 @@ class ContextPipeline:
             return "Changes rejected. Send another message to try again."
         self.resynthesizer.apply_changes(changes, auto_approve=True)
 
+        # Promote any remaining prompt nodes to session before rendering
+        remaining_prompt = self.graph.list_nodes(layer="prompt")
+        if remaining_prompt:
+            self.graph.promote_nodes([n.id for n in remaining_prompt], to_layer="session")
+
         similar_map = {}
         for t in tuples:
             pid = t.prompt_node.id
@@ -313,6 +325,7 @@ class ContextPipeline:
         response = self.step_12_send(system_prompt, user_input)
 
         print(f"\n  [Step 13] Decomposing response into response graph...")
+        prompt_ids = [n.id for n in nodes]
         resp_nodes, resp_edges = self.step_13_process_response(response)
 
         if resp_nodes:
@@ -327,11 +340,9 @@ class ContextPipeline:
             except EOFError:
                 approval = "y"
             if approval != "n":
-                prompt_ids = [n.id for n in nodes]
                 self.approve_response_graph(resp_nodes, prompt_node_ids=prompt_ids)
                 print(f"  Response graph merged into session.")
             else:
-                # Delete unapproved response nodes
                 for n in resp_nodes:
                     self.graph.delete_node(n.id)
                 print(f"  Response graph discarded.")

@@ -99,8 +99,7 @@ class PromptTemplate:
         prompt = self.render_prompt(similar_map)
 
         parts = []
-        # No system preamble — the graph sections ARE the context.
-        # Only add minimal instruction if there's actual content.
+        parts.append("Respond to the user naturally and directly.")
         if session:
             parts.append(session)
         if prompt:
