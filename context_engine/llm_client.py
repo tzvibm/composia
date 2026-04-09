@@ -31,17 +31,21 @@ class LLMClient:
     def call_json(self, prompt, system=None, max_tokens=4096, temperature=0):
         """Call LLM and parse JSON from response."""
         raw = self.call(prompt, system=system, max_tokens=max_tokens, temperature=temperature)
+        # Strip markdown code fences
+        cleaned = re.sub(r'```(?:json)?\s*', '', raw).strip()
+        cleaned = re.sub(r'```\s*$', '', cleaned).strip()
         try:
-            return json.loads(raw)
+            return json.loads(cleaned)
         except json.JSONDecodeError:
-            match = re.search(r'\{[\s\S]*\}', raw)
+            # Try extracting object
+            match = re.search(r'\{[\s\S]*\}', cleaned)
             if match:
                 try:
                     return json.loads(match.group())
                 except json.JSONDecodeError:
                     pass
             # Try array
-            match = re.search(r'\[[\s\S]*\]', raw)
+            match = re.search(r'\[[\s\S]*\]', cleaned)
             if match:
                 try:
                     return json.loads(match.group())

@@ -148,27 +148,35 @@ class Resynthesizer:
             )
         return lines
 
+    @staticmethod
+    def _clean_id(node_id):
+        """Strip @ prefix that LLM sometimes adds to node IDs."""
+        if isinstance(node_id, str):
+            return node_id.lstrip("@")
+        return node_id
+
     def _parse_changes(self, result, prompt_nodes, tuples):
         if not isinstance(result, dict):
             result = {}
 
+        cid = self._clean_id
         changeset = ChangeSet(
-            resynthesize=result.get("resynthesize", []),
-            correct=result.get("correct", []),
-            add_content=result.get("add_content", []),
-            update_summaries=result.get("update_summaries", []),
-            delete=result.get("delete", []),
+            resynthesize=[[cid(x[0]), x[1]] for x in result.get("resynthesize", []) if len(x) >= 2],
+            correct=[[cid(x[0]), x[1]] for x in result.get("correct", []) if len(x) >= 2],
+            add_content=[[cid(x[0]), x[1]] for x in result.get("add_content", []) if len(x) >= 2],
+            update_summaries=[[cid(x[0]), x[1]] for x in result.get("update_summaries", []) if len(x) >= 2],
+            delete=[cid(x) for x in result.get("delete", [])],
             new_edges=[
                 Edge(
-                    source_id=e["source_id"], target_id=e["target_id"],
+                    source_id=cid(e["source_id"]), target_id=cid(e["target_id"]),
                     edge_type=e.get("edge_type", "relates_to"),
                     context=e.get("context", ""),
                 )
                 for e in result.get("new_edges", [])
                 if isinstance(e, dict) and "source_id" in e
             ],
-            remove_edges=result.get("remove_edges", []),
-            promote_nodes=result.get("promote_nodes", []),
+            remove_edges=[[cid(x[0]), cid(x[1])] for x in result.get("remove_edges", []) if len(x) >= 2],
+            promote_nodes=[cid(x) for x in result.get("promote_nodes", [])],
             summary=result.get("summary", "Changes proposed."),
         )
 

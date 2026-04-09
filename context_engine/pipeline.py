@@ -232,10 +232,12 @@ class ContextPipeline:
         # Render and answer
         system_prompt = self.template.render_full(similar_map)
 
+        # For benchmarks: force single-word answers
+        bench_prompt = system_prompt + "\n\nAnswer with ONLY a single word or short phrase. No explanation."
         response = self.reason_llm.call(
             question,
-            system=system_prompt,
-            max_tokens=50,
+            system=bench_prompt,
+            max_tokens=20,
             temperature=0,
         )
 
